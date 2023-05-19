@@ -85,8 +85,10 @@ if __name__ == "__main__":
         pca_3d = pkl.load(open("./pca_npy/pca.pkl",'rb'))
     else:
         # load all meshes from data
-        # meshes  = [ load_obj_mesh(obj) for obj in obj_list]
-        meshes  = load_objs_as_meshes(obj_list)
+        # import pdb;pdb.set_trace()
+        # meshes  = load_objs_as_meshes(obj_list)
+        # meshes_verts = meshes._verts_list
+        meshes  = [ load_obj_mesh(obj) for obj in obj_list]
         meshes_verts = [mesh.v for mesh in meshes]
         
         DATA_3D  = np.c_[meshes_verts] # (442, 38726, 3)
@@ -124,3 +126,4 @@ if __name__ == "__main__":
     # pca_mesh.ft = ft
     
     # render(resolution=1024, mesh=pca_mesh)
+    pca_render(pca_3d.mean_, new_pc_val, pca_3d.components_, uvs, vn, faces, ft, resolution=1024)

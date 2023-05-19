@@ -13,7 +13,7 @@ from PIL import Image
 import cv2
 from easydict import EasyDict
 
-from testwindow import *
+# from testwindow import *
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
 import sys
