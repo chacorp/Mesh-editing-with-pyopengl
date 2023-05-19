@@ -40,6 +40,15 @@ def load_obj_mesh(mesh_path):
     mesh.ft = np.array(faces_uvs)
     return mesh
 
+def reconstruct(mean, coef, basis):
+    new_v = mean + np.dot(coef, basis)
+    new_v = torch.tensor(new_v.reshape(-1,3))
+    return new_v
+
+def recon_and_save(mean, coef, basis, faces, uvs):
+    new_v = reconstruct(mean, coef, basis)
+    save_obj("new_obj.obj", new_v, faces, verts_uvs=uvs)
+
 if __name__ == "__main__":
     import os.path
     from pytorch3d.io import save_obj, load_obj, load_objs_as_meshes
@@ -96,6 +105,4 @@ if __name__ == "__main__":
     print(f"original: \n{pca_3d.explained_variance_}\n")
     print(f"edited: \n{new_pc_val}\n")
 
-    new_v = torch.tensor((pca_3d.mean_ + np.dot(new_pc_val, pca_3d.components_)).reshape(-1,3))
-    
-    save_obj("new_obj.obj", new_v, faces, verts_uvs=uvs)
+    recon_and_save(pca_3d.mean_, new_pc_val, pca_3d.components_, faces, uvs)
