@@ -53,6 +53,7 @@ if __name__ == "__main__":
     import os.path
     from pytorch3d.io import save_obj, load_obj, load_objs_as_meshes
     import torch
+    import pickle as pkl
     
     objs = "./data/*/tpose/m.obj"
     obj_list = sorted(glob(objs))
@@ -68,7 +69,8 @@ if __name__ == "__main__":
     # faces   = tmp_obj.f
     # uvs     = tmp_obj.vt
     
-    if os.path.exists("./pca_npy/pca_basis.npy"):
+    # if os.path.exists("./pca_npy/pca_basis.npy"):
+    if os.path.exists("./pca_npy/pca.pkl"):
         pca_3d = edict()
         with open('./pca_npy/pca_basis.npy', 'rb') as f:
             pca_3d.components_ = np.load(f)
@@ -76,25 +78,38 @@ if __name__ == "__main__":
             pca_3d.explained_variance_ = np.load(f)
         with open('./pca_npy/pca_mean.npy', 'rb') as f:
             pca_3d.mean_ = np.load(f)
+            
+        with open('./pca_npy/422_fit_coef', 'rb') as f:
+            DATA_3D_FIT = np.load(f)
+            
+        pca_3d = pkl.load(open("pca.pkl",'rb'))
     else:
         # load all meshes from data
-        # meshes  = [ load_obj_mesh(obj) for obj in obj_list]
-        meshes  = load_objs_as_meshes(obj_list)
+        # import pdb;pdb.set_trace()
+        # meshes  = load_objs_as_meshes(obj_list)
+        # meshes_verts = meshes._verts_list
+        meshes  = [ load_obj_mesh(obj) for obj in obj_list]
         meshes_verts = [mesh.v for mesh in meshes]
         
-        DATA_3D = np.c_[meshes_verts] # (442, 38726, 3)
+        DATA_3D  = np.c_[meshes_verts] # (442, 38726, 3)
         DATA_3D_ = DATA_3D.reshape(442, -1)
 
         pca_3d = PCA(n_components=100)
         pca_3d.fit(DATA_3D_)
+        pkl.dump(pca_3d, open("pca.pkl","wb"))
         ### save PCA basis and coefficiants
-        np.save('./pca_npy/pca_basis', pca_3d.components_)
-        np.save('./pca_npy/pca_coeff', pca_3d.explained_variance_)
-        np.save('./pca_npy/pca_mean', pca_3d.mean_)
-
+        # np.save('./pca_npy/pca_basis', pca_3d.components_)
+        # np.save('./pca_npy/pca_coeff', pca_3d.explained_variance_)
+        # np.save('./pca_npy/pca_mean', pca_3d.mean_)
+        
+        ### PCA projection of data
+        # DATA_3D_FIT = pca_3d.fit_transform(DATA_3D_)
+        # np.save('./pca_npy/422_fit_coef', DATA_3D_FIT)
+        
     print("eigenvectors: \n", len(pca_3d.components_))
     print("eigenvalues: \n", len(pca_3d.explained_variance_))
-    import pdb;pdb.set_trace()
+    
+    # import pdb;pdb.set_trace()
     
     new_pc_val = np.ones_like(pca_3d.explained_variance_)
 
@@ -106,3 +121,4 @@ if __name__ == "__main__":
     print(f"edited: \n{new_pc_val}\n")
 
     recon_and_save(pca_3d.mean_, new_pc_val, pca_3d.components_, faces, uvs)
+    # recon_and_save(pca_3d.mean_, DATA_3D_FIT[2], pca_3d.components_, faces, uvs)
