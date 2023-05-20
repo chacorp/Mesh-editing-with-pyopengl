@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
     # if os.path.exists("./pca_npy/pca_basis.npy"):
     # if False:
-    if os.path.exists("./pca_npy/pca.pkl"):
+    if os.path.exists("./pca_npy/pca_100.pkl"):
         pca_3d = edict()
         # with open('./pca_npy/pca_basis.npy', 'rb') as f:
         #     pca_3d.components_ = np.load(f)
@@ -83,7 +83,7 @@ if __name__ == "__main__":
         # with open('./pca_npy/pca_mean.npy', 'rb') as f:
         #     pca_3d.mean_ = np.load(f)
             
-        pca_3d = pkl.load(open("./pca_npy/pca.pkl",'rb'))
+        pca_3d = pkl.load(open("./pca_npy/pca_100.pkl",'rb'))
     else:
         # load all meshes from data
         # import pdb;pdb.set_trace()
@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
         pca_3d = PCA(n_components=100)
         pca_3d.fit(DATA_3D_)
-        pkl.dump(pca_3d, open("pca.pkl","wb"))
+        pkl.dump(pca_3d, open("pca_100.pkl","wb"))
         ### save PCA basis and coefficiants
         # np.save('./pca_npy/pca_basis', pca_3d.components_)
         # np.save('./pca_npy/pca_coeff', pca_3d.explained_variance_)
