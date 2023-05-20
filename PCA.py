@@ -73,6 +73,7 @@ if __name__ == "__main__":
     
 
     # if os.path.exists("./pca_npy/pca_basis.npy"):
+    # if False:
     if os.path.exists("./pca_npy/pca.pkl"):
         pca_3d = edict()
         # with open('./pca_npy/pca_basis.npy', 'rb') as f:
@@ -88,8 +89,10 @@ if __name__ == "__main__":
         # import pdb;pdb.set_trace()
         # meshes  = load_objs_as_meshes(obj_list)
         # meshes_verts = meshes._verts_list
-        meshes  = [ load_obj_mesh(obj) for obj in obj_list]
-        meshes_verts = [mesh.v for mesh in meshes]
+        meshes  = [ load_obj(obj) for obj in obj_list]
+        meshes_verts = [mesh[0] for mesh in meshes]
+        # meshes  = [ load_obj_mesh(obj) for obj in obj_list]
+        # meshes_verts = [mesh.v for mesh in meshes]
         
         DATA_3D  = np.c_[meshes_verts] # (442, 38726, 3)
         DATA_3D_ = DATA_3D.reshape(442, -1)
