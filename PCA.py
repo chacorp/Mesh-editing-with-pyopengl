@@ -53,7 +53,7 @@ if __name__ == "__main__":
     import os.path
     from pytorch3d.io import save_obj, load_obj, load_objs_as_meshes
     import torch
-    from render_obj import render, pca_render
+    # from render_obj import render, pca_render
     import pickle as pkl
     
     objs = "./data/*/tpose/m.obj"
@@ -83,23 +83,23 @@ if __name__ == "__main__":
         # with open('./pca_npy/pca_mean.npy', 'rb') as f:
         #     pca_3d.mean_ = np.load(f)
             
-        pca_3d = pkl.load(open("./pca_npy/pca_100.pkl",'rb'))
+        pca_3d = pkl.load(open("./pca_npy/pca_50.pkl",'rb'))
     else:
         # load all meshes from data
-        # import pdb;pdb.set_trace()
         # meshes  = load_objs_as_meshes(obj_list)
         # meshes_verts = meshes._verts_list
-        meshes  = [ load_obj(obj) for obj in obj_list]
-        meshes_verts = [mesh[0] for mesh in meshes]
         # meshes  = [ load_obj_mesh(obj) for obj in obj_list]
         # meshes_verts = [mesh.v for mesh in meshes]
+        meshes       = [load_obj(obj) for obj in obj_list]
+        meshes_verts = [np.array(mesh[0]) for mesh in meshes]
+        # import pdb;pdb.set_trace()
         
         DATA_3D  = np.c_[meshes_verts] # (442, 38726, 3)
         DATA_3D_ = DATA_3D.reshape(442, -1)
 
-        pca_3d = PCA(n_components=100)
+        pca_3d = PCA(n_components=50)
         pca_3d.fit(DATA_3D_)
-        pkl.dump(pca_3d, open("pca_100.pkl","wb"))
+        pkl.dump(pca_3d, open("./pca_npy/pca_50.pkl","wb"))
         ### save PCA basis and coefficiants
         # np.save('./pca_npy/pca_basis', pca_3d.components_)
         # np.save('./pca_npy/pca_coeff', pca_3d.explained_variance_)
@@ -112,8 +112,7 @@ if __name__ == "__main__":
     # new_pc_val = np.ones_like(pca_3d.explained_variance_)
     new_pc_val = pca_3d.explained_variance_.copy()
 
-    idx = 10
-    new_pc_val[idx] = pca_3d.explained_variance_[idx] * 0.1
+    idx = 0;     new_pc_val[idx] = pca_3d.explained_variance_[idx] * -10
 
     # print(f"original: \n{pca_3d.explained_variance_}\n")
     # print(f"edited: \n{new_pc_val}\n")
@@ -129,4 +128,4 @@ if __name__ == "__main__":
     # pca_mesh.ft = ft
     
     # render(resolution=1024, mesh=pca_mesh)
-    pca_render(pca_3d.mean_, new_pc_val, pca_3d.components_, uvs, vn, faces, ft, resolution=1024)
+    # pca_render(pca_3d.mean_, new_pc_val, pca_3d.components_, uvs, vn, faces, ft, resolution=1024)
