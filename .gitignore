@@ -163,3 +163,7 @@ cython_debug/
 data*/
 test*/
 output*/
+imgui.ini
+*.obj
+pca_npy/
+testwindow.py
