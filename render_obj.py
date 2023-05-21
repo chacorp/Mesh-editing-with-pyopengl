@@ -134,6 +134,7 @@ def z_rotation(angle):
     return R
 
 def normalize_v(V):
+    V = np.array(V)
     V = (V-(V.max(0)+V.min(0))*0.5)/max(V.max(0)-V.min(0))
     # V = (V-(V.max(0).values + V.min(0).values) * 0.5)/max(V.max(0).values - V.min(0).values)
     
@@ -150,6 +151,7 @@ def load_obj_mesh(mesh_path):
     vertex_normal = []
     vertex_texture = []
     face_data = []
+    face_texture = []
     for line in open(mesh_path, "r"):
         if line.startswith('#'):
             continue
@@ -157,22 +159,26 @@ def load_obj_mesh(mesh_path):
         if not values:
             continue
         if values[0] == 'v':
-            v = list(map(float, values[1:4]))
+            v = list(map(float, values[1:]))
             vertex_data.append(v)
         if values[0] == 'vn':
-            vn = list(map(float, values[1:4]))
+            vn = list(map(float, values[1:]))
             vertex_normal.append(vn)
         if values[0] == 'vt':
-            vt = list(map(float, values[1:3]))
+            vt = list(map(float, values[1:]))
             vertex_texture.append(vt)
-        elif values[0] == 'f':
-            f = list(map(lambda x: int(x.split('/')[0]),  values[1:4]))
+        if values[0] == 'f':
+            # import pdb; pdb.set_trace()
+            f = list(map(lambda x: int(x.split('/')[0]),  values[1:]))
+            ft = list(map(lambda x: int(x.split('/')[1]),  values[1:]))
             face_data.append(f)
+            face_texture.append(ft)
     # mesh.v  = np.array(vertex_data)
     mesh.v  = normalize_v(np.array(vertex_data))
     mesh.vn = np.array(vertex_normal)
     mesh.vt = np.array(vertex_texture)
     mesh.f  = np.array(face_data) -1
+    mesh.ft  = np.array(face_texture) -1
     return mesh
 
 def vertex_normal(v1, v2, v3):
@@ -233,6 +239,47 @@ def render(resolution=512, mesh=None):
     Image.fromarray(rendered).save(savefile)
     return
 
+def data_render(resolution=512):
+    meshlist = sorted(glob("R:\\3DBiCar\\data\\*\\tpose\\m.obj"))
+    
+    from pytorch3d.io import load_obj    
+    # objs = "./data/*/tpose/m.obj"
+    # obj_list = sorted(glob(objs))    
+    # tmp_obj = load_obj(obj_list[0])
+    # verts = tmp_obj[0]
+    # faces = tmp_obj[1].verts_idx
+    # ft    = tmp_obj[1].textures_idx
+    # uvs   = tmp_obj[2].verts_uvs
+    # vn    = tmp_obj[2].normals
+    
+    for meshdir in meshlist:
+        idx = meshdir.split('\\')[-3]
+        # mesh = load_obj_mesh(meshdir)
+        tmp_obj = load_obj(meshdir)
+        mesh = EasyDict()
+        mesh.v  = tmp_obj[0]
+        mesh.f  = tmp_obj[1].verts_idx
+        mesh.ft = tmp_obj[1].textures_idx
+        mesh.vt = tmp_obj[2].verts_uvs
+        mesh.vn = tmp_obj[2].normals
+        mesh.v = normalize_v(mesh.v)
+        mesh.v[:,2] = mesh.v[:,2] * -1
+                
+        # image_path  = "D:\\test\\RaBit\\white.png"
+        image_path  = "D:\\test\\RaBit\\test\\tex.png"
+        rendered    = main(mesh, resolution, image_path, timer=True)
+        rendered    = rendered[::-1, :, :]
+        
+        # make directory
+        savefolder  = join('output')
+        if not exists(savefolder):
+            os.makedirs(savefolder)
+        print(idx)
+        savefile    = join(savefolder, 'rendered_{}.png'.format(idx))
+
+        Image.fromarray(rendered).save(savefile)
+        # return
+
 def pca_render(mean, coef, basis, uvs, vn, faces, ft, resolution=512):    
     pca_mesh    = EasyDict()
     pca_mesh.v  = None # dummy -> calculated in main()
@@ -242,7 +289,7 @@ def pca_render(mean, coef, basis, uvs, vn, faces, ft, resolution=512):
     pca_mesh.ft = ft
     
     # image_path  = "D:\\test\\RaBit\\white.png"
-    image_path  = "D:\\test\\RaBit\\output\\tex.png"
+    image_path  = "D:\\test\\RaBit\\test\\tex.png"
     rendered    = main(pca_mesh, resolution, image_path, timer=True, 
                        pca_v=True, mean=mean, coef=coef, basis=basis)
     rendered    = rendered[::-1, :, :]
@@ -301,7 +348,7 @@ def main(mesh, resolution, image_path, timer=False,
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
     # quad = np.concatenate( (new_v, new_vt, new_vn, new_vtan), axis=1)
     quad = np.array(quad, dtype=np.float32)
-    print(quad.shape)
+    # print(quad.shape)
 
     ############################################## shader ################
     vertex_shader_source   = open('shader.vs', 'r').read()
@@ -384,7 +431,7 @@ def main(mesh, resolution, image_path, timer=False,
     impl = GlfwRenderer(window)    
     
     i = 0
-    rotation_angle = 1
+    rotation_angle = 20
     while not glfw.window_should_close(window):
         # curr_time = (time.time()-start)
         if pca_v == True:
@@ -404,44 +451,44 @@ def main(mesh, resolution, image_path, timer=False,
         glDrawArrays(GL_TRIANGLES, 0, quad.shape[0])
 
         glfw.poll_events()
-        impl.process_inputs()
+        if pca_v == True:
+            impl.process_inputs()
+            imgui.new_frame()
 
-        imgui.new_frame()
+            if imgui.begin_main_menu_bar():
+                if imgui.begin_menu("File", True):
 
-        if imgui.begin_main_menu_bar():
-            if imgui.begin_menu("File", True):
+                    clicked_quit, selected_quit = imgui.menu_item(
+                        "Quit", "Cmd+Q", False, True
+                    )
 
-                clicked_quit, selected_quit = imgui.menu_item(
-                    "Quit", "Cmd+Q", False, True
+                    if clicked_quit:
+                        sys.exit(0)
+
+                    imgui.end_menu()
+                imgui.end_main_menu_bar()
+                
+            # rotation_angle, blendshape = show_example_slider(rotation_angle, blendshape)
+            imgui.menu_item(label="(dummy menu)", shortcut=None, selected=False, enabled=False)
+            clicked, rotation_angle = imgui.slider_float(
+                    label="Rotate",
+                    value=rotation_angle,
+                    min_value=0.0,
+                    max_value=360.0,
                 )
-
-                if clicked_quit:
-                    sys.exit(0)
-
-                imgui.end_menu()
-            imgui.end_main_menu_bar()
+            for i in range(100):    
+                clicked, blendshape[i] = imgui.slider_float(
+                    label="Value"+ str(i),
+                    value=blendshape[i],
+                    min_value=-1.0 if i >=2 else 0.0,
+                    max_value=1.0,
+                )
+                
+            rotation_angle = rotation_angle % 360
+            # show_test_window()
             
-        # rotation_angle, blendshape = show_example_slider(rotation_angle, blendshape)
-        imgui.menu_item(label="(dummy menu)", shortcut=None, selected=False, enabled=False)
-        clicked, rotation_angle = imgui.slider_float(
-                label="Rotate",
-                value=rotation_angle,
-                min_value=0.0,
-                max_value=360.0,
-            )
-        for i in range(100):    
-            clicked, blendshape[i] = imgui.slider_float(
-                label="Value"+ str(i),
-                value=blendshape[i],
-                min_value=-10.0,
-                max_value=10.0,
-            )
-            
-        rotation_angle = rotation_angle % 360
-        # show_test_window()
-        
-        imgui.render()
-        impl.render(imgui.get_draw_data())
+            imgui.render()
+            impl.render(imgui.get_draw_data())
         glfw.swap_buffers(window)
 
         glReadBuffer(GL_FRONT)
@@ -457,10 +504,12 @@ def main(mesh, resolution, image_path, timer=False,
         # i = i + 10
         
         # break
-    impl.shutdown()
+    if pca_v == True:
+        impl.shutdown()
     glfw.terminate()
     return a
 
 if __name__ == '__main__':
-    render(resolution=1024)
+    # render(resolution=512)
+    data_render(resolution=512)
 
