@@ -6,6 +6,11 @@ import numpy as np
 # run PCA
 from sklearn.decomposition import PCA
 
+import os.path
+from pytorch3d.io import save_obj, load_obj, load_objs_as_meshes
+import torch
+import pickle as pkl
+    
 def load_obj_mesh(mesh_path):
     mesh = edict()
     vertex_data = []
@@ -49,32 +54,10 @@ def recon_and_save(mean, coef, basis, faces, uvs):
     new_v = reconstruct(mean, coef, basis)
     save_obj("new_obj.obj", new_v, faces, verts_uvs=uvs)
 
-if __name__ == "__main__":
-    import os.path
-    from pytorch3d.io import save_obj, load_obj, load_objs_as_meshes
-    import torch
-    # from render_obj import render, pca_render
-    import pickle as pkl
-    
-    objs = "./data/*/tpose/m.obj"
-    obj_list = sorted(glob(objs))
-
-    
-    tmp_obj = load_obj(obj_list[0])
-    verts = tmp_obj[0]
-    faces = tmp_obj[1].verts_idx
-    ft    = tmp_obj[1].textures_idx
-    uvs   = tmp_obj[2].verts_uvs
-    vn    = tmp_obj[2].normals
-    
-    # tmp_obj = load_obj_mesh(obj_list[0])
-    # faces   = tmp_obj.f
-    # uvs     = tmp_obj.vt
-    
-
+def run_pca(obj_list, get_from_path=False):
     # if os.path.exists("./pca_npy/pca_basis.npy"):
     # if False:
-    if os.path.exists("./pca_npy/pca_100.pkl"):
+    if get_from_path:
         pca_3d = edict()
         # with open('./pca_npy/pca_basis.npy', 'rb') as f:
         #     pca_3d.components_ = np.load(f)
@@ -83,7 +66,9 @@ if __name__ == "__main__":
         # with open('./pca_npy/pca_mean.npy', 'rb') as f:
         #     pca_3d.mean_ = np.load(f)
             
-        pca_3d = pkl.load(open("./pca_npy/pca_50.pkl",'rb'))
+        # pca_3d = pkl.load(open("./pca_npy/pca_50_v1.pkl",'rb'))
+        # pca_3d = pkl.load(open("./pca_npy/pca_100_v1.pkl",'rb'))
+        pca_3d = pkl.load(open("./pca_npy/pca_30_v2.pkl",'rb'))
     else:
         # load all meshes from data
         # meshes  = load_objs_as_meshes(obj_list)
@@ -104,20 +89,39 @@ if __name__ == "__main__":
         # np.save('./pca_npy/pca_basis', pca_3d.components_)
         # np.save('./pca_npy/pca_coeff', pca_3d.explained_variance_)
         # np.save('./pca_npy/pca_mean', pca_3d.mean_)
+    return pca_3d
+
+if __name__ == "__main__":
+    datas = "./data/*/tpose/m.obj"
+    obj_list = sorted(glob(datas))
+    
+    tmp_obj = load_obj(obj_list[0])
+    verts = tmp_obj[0]
+    faces = tmp_obj[1].verts_idx
+    ft    = tmp_obj[1].textures_idx
+    uvs   = tmp_obj[2].verts_uvs
+    vn    = tmp_obj[2].normals
+    # tmp_obj = load_obj_mesh(obj_list[0])
+    # faces   = tmp_obj.f
+    # uvs     = tmp_obj.vt
+    
+    
+    # pca_3d = run_pca(obj_list, False)
+    pca_3d = run_pca(obj_list, True)
 
     print("eigenvectors: ", len(pca_3d.components_))
     print("eigenvalues: ",  len(pca_3d.explained_variance_))
     # import pdb ; pdb.set_trace()
     
     # new_pc_val = np.ones_like(pca_3d.explained_variance_)
-    new_pc_val = pca_3d.explained_variance_.copy()
+    # new_pc_val = pca_3d.explained_variance_.copy()
 
-    idx = 0;     new_pc_val[idx] = pca_3d.explained_variance_[idx] * -10
+    # idx = 0;     new_pc_val[idx] = pca_3d.explained_variance_[idx] * -10
 
     # print(f"original: \n{pca_3d.explained_variance_}\n")
     # print(f"edited: \n{new_pc_val}\n")
 
-    recon_and_save(pca_3d.mean_, new_pc_val, pca_3d.components_, faces, uvs)
+    # recon_and_save(pca_3d.mean_, new_pc_val, pca_3d.components_, faces, uvs)
     
     # pca_mesh    = edict()
     # pca_mesh.v  = reconstruct(pca_3d.mean_, new_pc_val, pca_3d.components_)
@@ -127,5 +131,6 @@ if __name__ == "__main__":
     # pca_mesh.f  = faces
     # pca_mesh.ft = ft
     
+    from render_obj import render, pca_render
     # render(resolution=1024, mesh=pca_mesh)
-    # pca_render(pca_3d.mean_, new_pc_val, pca_3d.components_, uvs, vn, faces, ft, resolution=1024)
+    pca_render(pca_3d.mean_, pca_3d.explained_variance_, pca_3d.components_, uvs, vn, faces, ft, resolution=1024)
