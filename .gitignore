@@ -163,3 +163,4 @@ cython_debug/
 data*/
 test*/
 output*/
+pca_npy*/
