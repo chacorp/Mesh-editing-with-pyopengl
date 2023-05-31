@@ -170,9 +170,10 @@ def load_obj_mesh(mesh_path):
         if values[0] == 'f':
             # import pdb; pdb.set_trace()
             f = list(map(lambda x: int(x.split('/')[0]),  values[1:]))
-            ft = list(map(lambda x: int(x.split('/')[1]),  values[1:]))
             face_data.append(f)
-            face_texture.append(ft)
+            if len(values[1].split('/')) > 1:
+                ft = list(map(lambda x: int(x.split('/')[1]),  values[1:]))
+                face_texture.append(ft)
     # mesh.v  = np.array(vertex_data)
     mesh.v  = normalize_v(np.array(vertex_data))
     mesh.vn = np.array(vertex_normal)
@@ -221,12 +222,13 @@ def computeTangentBasis(vertex, uv):
 
 def render(resolution=512, mesh=None):
     if mesh is None:
-        mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
+        # mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
+        mesh = load_obj_mesh("mean.obj")
     
     mesh.v      = normalize_v(mesh.v)
     
-    # image_path  = "D:\\test\\RaBit\\white.png"
-    image_path  = "D:\\test\\RaBit\\output\\tex.png"
+    # image_path  = "white.png"
+    image_path  = "experiment/output/tex.png"
     rendered    = main(mesh, resolution, image_path, timer=True)
     rendered    = rendered[::-1, :, :]
     
@@ -265,8 +267,8 @@ def data_render(resolution=512):
         mesh.v = normalize_v(mesh.v)
         mesh.v[:,2] = mesh.v[:,2] * -1
                 
-        # image_path  = "D:\\test\\RaBit\\white.png"
-        image_path  = "D:\\test\\RaBit\\test\\tex.png"
+        # image_path  = "white.png"
+        image_path  = "experiment/tex.png"
         rendered    = main(mesh, resolution, image_path, timer=True)
         rendered    = rendered[::-1, :, :]
         
@@ -288,14 +290,14 @@ def pca_render(mean, coef, basis, uvs, vn, faces, ft, resolution=512):
     pca_mesh.f  = faces
     pca_mesh.ft = ft
     
-    # image_path  = "D:\\test\\RaBit\\white.png"
-    image_path  = "D:\\test\\RaBit\\test\\tex.png"
+    # image_path  = "white.png"
+    image_path  = "experiment/test/tex.png"
     rendered    = main(pca_mesh, resolution, image_path, timer=True, 
                        pca_v=True, mean=mean, coef=coef, basis=basis)
     rendered    = rendered[::-1, :, :]
     
     # make directory
-    savefolder  = join('output')
+    savefolder  = join('experiment/output')
     if not exists(savefolder):
         os.makedirs(savefolder)
     savefile    = join(savefolder, 'rendered.png')
@@ -328,19 +330,15 @@ def main(mesh, resolution, image_path, timer=False,
         return
 
     glfw.make_context_current(window)
-    
-    if pca_v == True:
-        blendshape = np.ones_like(coef)
-        new_v = mean + np.dot(coef * blendshape, basis)
-        new_v = new_v.reshape(-1,3)
-        new_v = normalize_v(new_v)
-        new_v[:, 2] = new_v[:, 2] * -1
-        new_v = new_v[f].reshape(-1, 3)
-    else:
-        new_v  = v[f].reshape(-1, 3)
         
     new_vt = vt[ft].reshape(-1,2)
     new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
+    
+    if pca_v == True:
+        blendshape = np.zeros_like(coef)
+        new_v = np.zeros_like(new_vt) # dummy -> will be updated in while loop
+    else:
+        new_v  = v[f].reshape(-1, 3)
     
     # new_vn = vn[f].reshape(-1, 3)
     new_vn = np.zeros_like(new_v)
@@ -431,14 +429,14 @@ def main(mesh, resolution, image_path, timer=False,
     impl = GlfwRenderer(window)    
     
     i = 0
-    rotation_angle = 20
+    rotation_angle = 180
     while not glfw.window_should_close(window):
         # curr_time = (time.time()-start)
         if pca_v == True:
             new_v = mean + np.dot(coef * blendshape, basis)
             new_v = new_v.reshape(-1,3)
-            new_v = normalize_v(new_v)
-            new_v[:, 2] = new_v[:, 2] * -1
+            # new_v = normalize_v(new_v)
+            # new_v[:, 2] = new_v[:, 2] * -1
             new_v = new_v[f].reshape(-1, 3)
             quad[:, :3] = new_v
             glBindBuffer(GL_ARRAY_BUFFER, VBO)
@@ -473,15 +471,16 @@ def main(mesh, resolution, image_path, timer=False,
             clicked, rotation_angle = imgui.slider_float(
                     label="Rotate",
                     value=rotation_angle,
-                    min_value=0.0,
-                    max_value=360.0,
+                    min_value = 0.0,
+                    max_value = 360.0,
                 )
-            for i in range(100):    
+            for i in range(len(blendshape)):    
                 clicked, blendshape[i] = imgui.slider_float(
                     label="Value"+ str(i),
                     value=blendshape[i],
-                    min_value=-1.0 if i >=2 else 0.0,
-                    max_value=1.0,
+                    # min_value=-1.0 if i >= 1 else 0.0,
+                    min_value = -1.0,
+                    max_value =  1.0,
                 )
                 
             rotation_angle = rotation_angle % 360
@@ -510,6 +509,6 @@ def main(mesh, resolution, image_path, timer=False,
     return a
 
 if __name__ == '__main__':
-    # render(resolution=512)
-    data_render(resolution=512)
+    render(resolution=512)
+    # data_render(resolution=512)
 
