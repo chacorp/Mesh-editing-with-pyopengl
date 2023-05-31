@@ -167,3 +167,4 @@ imgui.ini
 *.obj
 pca_npy/
 testwindow.py
+experiment*/
