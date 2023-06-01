@@ -351,18 +351,22 @@ def main(resolution):
     region_x = -100
     region_y = -100
     
+    m_ldm1 = np.array([-1.0, -1.0, -1.0])
+    m_ldm2 = np.array([-1.0, -1.0, -1.0])
+    
     transform = glGetUniformLocation(shader, "transform")    
     
     gltrans3fv= glGetUniformLocation(shader, "trans")
     glmouse2fv= glGetUniformLocation(shader, "mouse")
     
-    gl_ldm    = glGetUniformLocation(shader, "ldm")
+    gl_ldm1   = glGetUniformLocation(shader, "m_ldm1")
+    gl_ldm2   = glGetUniformLocation(shader, "m_ldm2")
     
     glView    = glGetUniformLocation(shader, "proj")
     glshow_bg = glGetUniformLocation(shader, "show_bg")
     glshow_m  = glGetUniformLocation(shader, "show_m")
     gl_alpha  = glGetUniformLocation(shader, "_alpha")
-    view = glm.ortho(-1.0, 2.0, -1.0, 1.0, 0.0001, 1000.0) 
+    # view = glm.ortho(-1.0, 2.0, -1.0, 1.0, 0.0001, 1000.0) 
     view = glm.ortho(-1.0, 1.0, -1.0, 1.0, 0.0001, 1000.0) 
     glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
     
@@ -417,14 +421,14 @@ def main(resolution):
         
         ## translate based on upper min
         pca_v = pca_v.reshape(-1,3) # 1402 3 
-        mean_v = pca_v.mean(0) + trans
+        mean_v = pca_v.mean(0)
+        mean_v = mean_v + np.array([transX, transY, transZ])
+        
         # full_v = normalize_v(pca_v)
         full_v = pca_v
         full_v = full_v * np.array([scaleX, scaleY, scaleZ])
         quad[bg_quad.shape[0]:, 0:3] = full_v[f].reshape(-1, 3)
         
-        
-        ############################################## uniforms #########
         glUniform1f(glshow_bg, bg_onoff)
         glUniform1f(glshow_m,  m_onoff)
         glUniform1f(gl_alpha,  tex_alpha)
@@ -433,6 +437,9 @@ def main(resolution):
         glUniform3fv(gltrans3fv, 1, trans)
         mouse = np.array([region_x, region_y])
         glUniform2fv(glmouse2fv, 1, mouse)
+        
+        glUniform3fv(gl_ldm1, 1, m_ldm1)
+        glUniform3fv(gl_ldm2, 1, m_ldm2)
         
         rotation_mat = y_rotation(rotation_angle)
         glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
@@ -444,17 +451,15 @@ def main(resolution):
         glBindTexture(GL_TEXTURE_2D, texture2)
         
         glUniform1i(glGetUniformLocation(shader, "texture1"), 0)
-        glUniform1i(glGetUniformLocation(shader, "texture2"), 1)        
-        ############################################## uniforms #########
+        glUniform1i(glGetUniformLocation(shader, "texture2"), 1)
         
-        ############################################## Draw #############
+        
         glBindBuffer(GL_ARRAY_BUFFER, VBO)
         glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
         
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         
         glDrawArrays(GL_TRIANGLES, 0, quad.shape[0])
-        ############################################## Draw #############
         
 
         glfw.poll_events()
@@ -472,16 +477,25 @@ def main(resolution):
             #             sys.exit(0)
             #         imgui.end_menu()
             #     imgui.end_main_menu_bar()
-                
             # rotation_angle, blendshape = show_example_slider(rotation_angle, blendshape)
-            imgui.text("x: {}".format(mean_v[0]))
-            imgui.text("y: {}".format(mean_v[1]))
-            imgui.text("z: {}".format(mean_v[2]))
+            
+            imgui.text("mean vert: {}".format(mean_v))
+            
+                # pos = imgui.get_cursor_screen_pos()
+            region_x = (imgui.get_mouse_position().x / resolution) * 2 - 1
+            region_y = (imgui.get_mouse_position().y / resolution) * -2 + 1
             
             if imgui.is_mouse_double_clicked(0):
-                # pos = imgui.get_cursor_screen_pos()
-                region_x = (imgui.get_mouse_position().x / resolution) * 2 - 1
-                region_y = (imgui.get_mouse_position().y / resolution) * -2 + 1
+                region_xy = np.array([region_x, region_y])
+                print(region_xy.shape)
+                condition = np.linalg.norm(full_v[:, :2] - region_xy, axis=1)
+                print(condition.shape)
+                # m_ldm1 = full_v[np.where(condition < 0.1)]
+                m_ldm1 = full_v[condition.argmin()]
+                print(m_ldm1)
+            
+            imgui.text("ldm_1: {}".format(m_ldm1))
+            imgui.text("ldm_2: {}".format(m_ldm2))
             imgui.text("region_x: {}".format(region_x))
             imgui.text("region_y: {}".format(region_y))
             
@@ -501,12 +515,8 @@ def main(resolution):
             else:
                 m_onoff = 0
             
-            clicked, tex_alpha = imgui.slider_float(
-                    label="_alpha",
-                    value=tex_alpha,
-                    min_value = 0.0,
-                    max_value = 1.0,
-                )            
+            clicked, tex_alpha = imgui.slider_float(label="_alpha", value=tex_alpha, min_value=0.0, max_value=1.0)
+            
             clicked, rotation_angle = imgui.slider_float(
                     label="Rotate",
                     value=rotation_angle,
