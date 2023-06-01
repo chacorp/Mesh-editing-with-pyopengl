@@ -34,14 +34,15 @@ void main()
 {
     vec3 bitangent = cross(normal, tangent);
     // mat3 TBN = mat3(tangent, bitangent, normal);
-    vec4 tempPosition;
+    vec4 tempPosition = vec4(position.x, position.y, position.z, 1.0f);
+
     if (texcoord.z == 1.0f){
-        tempPosition = vec4(position.x + trans.x, position.y + trans.y, position.z + trans.z, 1.0f);
+        // tempPosition = vec4(position.x + trans.x, position.y + trans.y, position.z + trans.z, 1.0f);
         tempPosition = proj * transform * tempPosition;
         
     }
     else{
-        tempPosition = vec4(position.x, position.y, position.z + trans.z, 1.0f);
+        tempPosition.z = tempPosition.z + trans.z;
         tempPosition = proj * tempPosition;
     }
 

@@ -324,7 +324,7 @@ def main(resolution):
     ############################################## texture map ###########
     
     i = 0
-    rotation_angle = 0
+    rotation_ = 0
     frame = 0
     max_frame = pca_weight.shape[0]-1
     min_frame = 0
@@ -338,10 +338,10 @@ def main(resolution):
     trans = np.array([transX, transY, transZ])
     
     Reset_button = False
-    bg_onoff = 1.0
+    show_bg = 1.0
     show_bg = True
     tex_alpha = 1.0
-    m_onoff = 1.0
+    show_m = 1.0
     show_m = True
     
     Save_frame = False
@@ -351,9 +351,13 @@ def main(resolution):
     region_x = -100
     region_y = -100
     
-    m_ldm1 = np.array([-10.0, -10.0, -10.0])
-    m_ldm2 = np.array([-10.0, -10.0, -10.0])
-    ldm_shift = False
+    crop = False
+    _ratio = 1.0
+    
+    m_ldm1     = np.array([-10.0, -10.0, -10.0])
+    m_ldm2     = np.array([-10.0, -10.0, -10.0])
+    ldm_shift  = False
+    show_ldm   = False
     m_ldm1_idx = 0
     m_ldm2_idx = 0
     
@@ -364,6 +368,7 @@ def main(resolution):
     
     gl_ldm1   = glGetUniformLocation(shader, "m_ldm1")
     gl_ldm2   = glGetUniformLocation(shader, "m_ldm2")
+    glshow_ldm= glGetUniformLocation(shader, "show_ldm")
     
     glView    = glGetUniformLocation(shader, "proj")
     glshow_bg = glGetUniformLocation(shader, "show_bg")
@@ -424,27 +429,43 @@ def main(resolution):
         
         ## translate based on upper min
         pca_v = pca_v.reshape(-1,3) # 1402 3 
-        mean_v = pca_v.mean(0)
-        mean_v = mean_v + np.array([transX, transY, transZ])
         
         # full_v = normalize_v(pca_v)
         full_v = pca_v
         full_v = full_v * np.array([scaleX, scaleY, scaleZ])
+                
+        if m_ldm1.mean() != -10.0 or m_ldm2.mean() != -10.0:
+            if crop:
+                min_x  = min(full_v[m_ldm1_idx][0], full_v[m_ldm2_idx][0])
+                max_x  = max(full_v[m_ldm1_idx][0], full_v[m_ldm2_idx][0])
+                mean_y = (full_v[m_ldm1_idx][1] + full_v[m_ldm2_idx][1]) * 0.5
+                
+                # re-normalize x axis
+                full_v[:, 0] = full_v[:,0] - min_x
+                full_v[:, 0] = full_v[:, 0] / (max_x - min_x) * 2 - 1
+                full_v[:, 0] = full_v[:, 0] * _ratio
+                full_v[:, 1] = full_v[:, 1] - mean_y
+        full_v = full_v + trans
+        
         quad[bg_quad.shape[0]:, 0:3] = full_v[f].reshape(-1, 3)
         
-        glUniform1f(glshow_bg, bg_onoff)
-        glUniform1f(glshow_m,  m_onoff)
-        glUniform1f(gl_alpha,  tex_alpha)
-        
         trans = np.array([transX, transY, transZ])
-        glUniform3fv(gltrans3fv, 1, trans)
         mouse = np.array([region_x, region_y])
+        
+        glUniform3fv(gltrans3fv, 1, trans)
         glUniform2fv(glmouse2fv, 1, mouse)
+        
+        mean_v = pca_v.mean(0) + trans
         
         glUniform3fv(gl_ldm1, 1, m_ldm1)
         glUniform3fv(gl_ldm2, 1, m_ldm2)
         
-        rotation_mat = y_rotation(rotation_angle)
+        glUniform1f(glshow_ldm, show_ldm)
+        glUniform1f(glshow_bg,  show_bg)
+        glUniform1f(glshow_m,   show_m)
+        glUniform1f(gl_alpha,   tex_alpha)
+        
+        rotation_mat = y_rotation(rotation_)
         glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
         
         glActiveTexture(GL_TEXTURE0);
@@ -480,7 +501,7 @@ def main(resolution):
             #             sys.exit(0)
             #         imgui.end_menu()
             #     imgui.end_main_menu_bar()
-            # rotation_angle, blendshape = show_example_slider(rotation_angle, blendshape)
+            # rotation_, blendshape = show_example_slider(rotation_, blendshape)
             
             imgui.text("mean vert: {}".format(mean_v))
             
@@ -490,116 +511,69 @@ def main(resolution):
             
             if imgui.is_mouse_double_clicked(0):
                 region_xy = np.array([region_x, region_y])
-                print(region_xy.shape)
+                # print(region_xy.shape)
                 condition = np.linalg.norm(full_v[:, :2] - region_xy, axis=1)
-                print(condition.shape)
-                # m_ldm1 = full_v[np.where(condition < 0.1)]
+                # print(condition.shape)
+                show_ldm = True
                 if not ldm_shift:
                     m_ldm1_idx = condition.argmin()                
                     ldm_shift = True
                 else:
                     m_ldm2_idx = condition.argmin()                
                     ldm_shift = False
-                # m_ldm1 = full_v[condition.argmin()]
-                print(m_ldm1)
-            m_ldm1 = full_v[m_ldm1_idx]
-            m_ldm2 = full_v[m_ldm2_idx]
+            if show_ldm:
+                m_ldm1 = full_v[m_ldm1_idx]
+                m_ldm2 = full_v[m_ldm2_idx]
             
-            imgui.text("ldm_1: {}".format(m_ldm1))
-            imgui.text("ldm_2: {}".format(m_ldm2))
-            imgui.text("region_x: {}".format(region_x))
-            imgui.text("region_y: {}".format(region_y))
+            imgui.text("ldm_1: {} {}".format(m_ldm1_idx, m_ldm1))
+            imgui.text("ldm_2: {} {}".format(m_ldm2_idx, m_ldm2))
+            # imgui.text("region_x: {}".format(region_x))
+            # imgui.text("region_y: {}".format(region_y))
             
             clicked_bg, show_bg = imgui.menu_item(
                     "Show Background", None, show_bg
                 )
             if show_bg:
-                bg_onoff = 1
+                show_bg = 1
             else:
-                bg_onoff = 0
+                show_bg = 0
                 
             clicked_bg, show_m = imgui.menu_item(
                     "Show Model", None, show_m
                 )
             if show_m:
-                m_onoff = 1
+                show_m = 1
             else:
-                m_onoff = 0
+                show_m = 0
             
             clicked, tex_alpha = imgui.slider_float(label="_alpha", value=tex_alpha, min_value=0.0, max_value=1.0)
+            clicked, _ratio = imgui.slider_float(label="_ratio", value=_ratio, min_value=0.0, max_value=1.0)
+            # clicked, rotation_ = imgui.slider_float(label="Rotate", value=rotation_, min_value=0.0, max_value=360.0,)
+            clicked, frame = imgui.slider_int(label="frame", value=frame, min_value=min_frame, max_value=max_frame)
+            changed, frame = imgui.input_int(label="select frame", value=frame, step=1)
             
-            clicked, rotation_angle = imgui.slider_float(
-                    label="Rotate",
-                    value=rotation_angle,
-                    min_value = 0.0,
-                    max_value = 360.0,
-                )
-            clicked, frame = imgui.slider_int(
-                    label="frame",
-                    value=frame,
-                    min_value = min_frame,
-                    max_value = max_frame,
-                )
-            changed, frame = imgui.input_int(
-                label="select frame", value=frame, step=1
-            )
             if frame < 0:
                 frame = 0
             if frame > max_frame:
                 frame = max_frame
             
-            clicked, scaleX = imgui.slider_float(
-                    label="Scale x",
-                    value=scaleX,
-                    min_value = 0.1,
-                    max_value = 10.0,
-                )
-            clicked, scaleY = imgui.slider_float(
-                    label="Scale y",
-                    value=scaleY,
-                    min_value = 0.1,
-                    max_value = 10.0,
-                )
-            clicked, scaleZ = imgui.slider_float(
-                    label="Scale z",
-                    value=scaleZ,
-                    min_value = 0.1,
-                    max_value = 10.0,
-                )
-            clicked, transX = imgui.slider_float(
-                    label="trans x",
-                    value=transX,
-                    min_value = -2.0,
-                    max_value = 2.0,
-                )
-            clicked, transY = imgui.slider_float(
-                    label="trans y",
-                    value=transY,
-                    min_value = -2.0,
-                    max_value = 2.0,
-                )
-            clicked, transZ = imgui.slider_float(
-                    label="trans z",
-                    value=transZ,
-                    min_value = -100,
-                    max_value = 10,
-                )
-            changed, Reset_button = imgui.menu_item(
-                    "Reset", None, Reset_button
-                )
-            clicked_save1, Save_frame = imgui.menu_item(
-                    "Save frame", None, Save_frame
-                )
-            clicked_save2, Save_all = imgui.menu_item(
-                    "Save all frames", None, Save_all
-                )
-            clicked_save3, Save_stop = imgui.menu_item(
-                    "Stop save", None, Save_stop
-                )
+            clicked, scaleX = imgui.slider_float(label="Scale x", value=scaleX, min_value= 0.1,  max_value= 10.0,)
+            clicked, scaleY = imgui.slider_float(label="Scale y", value=scaleY, min_value= 0.1,  max_value= 10.0,)
+            clicked, scaleZ = imgui.slider_float(label="Scale z", value=scaleZ, min_value= 0.1,  max_value= 10.0,)
+            clicked, transX = imgui.slider_float(label="trans x", value=transX, min_value=-2.0,  max_value= 2.0,)
+            clicked, transY = imgui.slider_float(label="trans y", value=transY, min_value=-2.0,  max_value= 2.0,)
+            clicked, transZ = imgui.slider_float(label="trans z", value=transZ, min_value=-100,  max_value= 10,)
+            
+            changed, Reset_button     = imgui.menu_item("Reset", None, Reset_button)
+            clicked_save1, Save_frame = imgui.menu_item("Save frame", None, Save_frame)
+            clicked_save2, Save_all   = imgui.menu_item("Save all frames", None, Save_all)
+            clicked_save3, Save_stop  = imgui.menu_item("Stop save", None, Save_stop)
+            
+            clicked_save3, crop       = imgui.menu_item("crop", None, crop)
+            clicked_save3, show_ldm   = imgui.menu_item("show ldm", None, show_ldm)
+            
             if Reset_button:
                 blendshape = blendshape * 0
-                # lower_blendshape = lower_blendshape * 0
-                # upper_v_y_min = upper_trans_limit
                 scaleX = 1.0
                 scaleY = 1.0
                 scaleZ = 1.0
@@ -608,7 +582,9 @@ def main(resolution):
                 transZ = -10.0
                 frame  = 0
                 Reset_button = False
-                rotation_angle = 0
+                rotation_ = 0
+                crop = False
+                show_ldm = False
             
             if Save_stop:
                 Save_frame = False
@@ -664,7 +640,7 @@ def main(resolution):
                 )
             ######################################## blendshape model #######
                 
-            rotation_angle = rotation_angle % 360
+            rotation_ = rotation_ % 360
             # show_test_window()
             imgui.render()
             impl.render(imgui.get_draw_data())

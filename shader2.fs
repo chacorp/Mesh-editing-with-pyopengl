@@ -14,6 +14,7 @@ uniform mat4 transform;
 uniform float _alpha;
 uniform float show_bg;
 uniform float show_m;
+uniform float show_ldm;
 
 uniform vec2 mouse;
 
@@ -46,14 +47,18 @@ void main()
     // vec4 tempColor = tex_col * 0.8 + diffuse * 0.2;
     // vec4 tempColor = tex_col * zero + diffuse * zero + vec4(OutNormal, 1.0f);
     vec4 tempColor = tex_col + zero * vec4(OutNormal, 1.0f);
+    
     // vec4 Normal = vec4(OutNormal.x, OutNormal.y, OutNormal.z, 1.0f);
     // vec4 tempColor = tex_col * zero + Normal * 0.5f + 0.5f;
 
     if (OutCoord.z == 1.0f){
         // tempColor.xyz = tempColor.xyz * _alpha;
+        if (tex_col.x + tex_col.y + tex_col.z == 0f){
+            tempColor.w = 0.0f;
+        }
         OutColor = tempColor;
         if (show_m == 1.0f){
-            OutColor.w = _alpha;
+            OutColor.w = tempColor.w *_alpha;
         }
         else{
             OutColor.w = 0.0f;
@@ -79,9 +84,16 @@ void main()
     //     OutColor = vec4(1.0f, 0.0f, 0.0f, 1.0f);
     // }
 
-    vec2 ldmdir = worldPosition.xy - m_ldm1.xy;
-    float ldmDis = ldmdir.x * ldmdir.x + ldmdir.y * ldmdir.y;
-    if (sqrt(ldmDis) < 0.05f){
-        OutColor = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    if (show_ldm == 1.0f){
+        vec2 ldm1dir = worldPosition.xy - m_ldm1.xy;
+        float ldm1Dis = ldm1dir.x * ldm1dir.x + ldm1dir.y * ldm1dir.y;
+        if (sqrt(ldm1Dis) < 0.02f){
+            OutColor = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+        }
+        vec2 ldm2dir = worldPosition.xy - m_ldm2.xy;
+        float ldm2Dis = ldm2dir.x * ldm2dir.x + ldm2dir.y * ldm2dir.y;
+        if (sqrt(ldm2Dis) < 0.02f){
+            OutColor = vec4(0.0f, 0.5f, 1.0f, 1.0f);
+        }
     }
 }
