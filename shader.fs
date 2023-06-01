@@ -1,6 +1,5 @@
 #version 330 core
 in vec4 worldPosition;
-// in vec3 vertColor;
 in vec3 OutNormal;
 in vec3 OutCoord;
 
@@ -17,7 +16,7 @@ void main()
     vec4 tex_col  = texture(texture1, uv);
     float zero = 0.000000001;
 
-    vec4 tempColor = vec4(OutNormal, 0.0f) * zero + worldPosition * zero + tex_col;
+    vec4 tempColor = vec4(OutNormal, 0.0f) * zero + tex_col;
     
     OutColor = tempColor;
     OutColor.w = 1.0f;
