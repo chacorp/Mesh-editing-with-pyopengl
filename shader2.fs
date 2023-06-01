@@ -6,8 +6,10 @@ in vec4 nearVert;
 
 out vec4 OutColor;
 
-uniform sampler2D texture1;
-uniform sampler2D texture2;
+uniform sampler2D texture0; // texture
+uniform sampler2D texture1; // ref image eye left
+uniform sampler2D texture2; // ref image eye right
+uniform sampler2D texture3; // ref image lips
 
 uniform mat4 transform;
 
@@ -28,9 +30,17 @@ void main()
 
     vec4 tex_col;
     if (OutCoord.z == 1.0f)
-        tex_col  = texture(texture1, uv);
+        tex_col  = texture(texture0, uv);
     else
-        tex_col  = texture(texture2, uv);
+        if (show_bg == 1.0f){
+            tex_col  = texture(texture1, uv);
+        }
+        else if (show_bg == 2.0f){
+            tex_col  = texture(texture2, uv);
+        }
+        else if (show_bg == 3.0f){
+            tex_col  = texture(texture3, uv);
+        }
 
     float zero = 0.000000001;
 
@@ -65,7 +75,7 @@ void main()
         }
     }
     else{
-        if (show_bg == 1.0f){
+        if (show_bg != 0.0f){
             OutColor = tempColor;
         }
         else{
