@@ -351,8 +351,11 @@ def main(resolution):
     region_x = -100
     region_y = -100
     
-    m_ldm1 = np.array([-1.0, -1.0, -1.0])
-    m_ldm2 = np.array([-1.0, -1.0, -1.0])
+    m_ldm1 = np.array([-10.0, -10.0, -10.0])
+    m_ldm2 = np.array([-10.0, -10.0, -10.0])
+    ldm_shift = False
+    m_ldm1_idx = 0
+    m_ldm2_idx = 0
     
     transform = glGetUniformLocation(shader, "transform")    
     
@@ -491,8 +494,16 @@ def main(resolution):
                 condition = np.linalg.norm(full_v[:, :2] - region_xy, axis=1)
                 print(condition.shape)
                 # m_ldm1 = full_v[np.where(condition < 0.1)]
-                m_ldm1 = full_v[condition.argmin()]
+                if not ldm_shift:
+                    m_ldm1_idx = condition.argmin()                
+                    ldm_shift = True
+                else:
+                    m_ldm2_idx = condition.argmin()                
+                    ldm_shift = False
+                # m_ldm1 = full_v[condition.argmin()]
                 print(m_ldm1)
+            m_ldm1 = full_v[m_ldm1_idx]
+            m_ldm2 = full_v[m_ldm2_idx]
             
             imgui.text("ldm_1: {}".format(m_ldm1))
             imgui.text("ldm_2: {}".format(m_ldm2))
