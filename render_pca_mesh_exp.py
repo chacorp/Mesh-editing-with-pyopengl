@@ -141,20 +141,6 @@ def render(resolution=512, mesh=None):
     return
 
 def main(resolution):
-    # tmp_obj     = load_obj("data/100/tpose/m.obj")
-    tmp_obj     = load_obj("experiment/mesh/girl/0_girl/neutral.obj")
-    mesh        = EasyDict()
-    mesh.v      = tmp_obj[0]
-    mesh.f      = tmp_obj[1].verts_idx
-    mesh.ft     = tmp_obj[1].textures_idx
-    mesh.vt     = tmp_obj[2].verts_uvs
-    mesh.vn     = tmp_obj[2].normals
-        
-    # image_path = "white.png"
-    image_path = "white3.png"
-    bg_path1    = "experiment/real/patch_eyel.png"
-    bg_path2    = "experiment/real/patch_eyer.png"
-    bg_path3    = "experiment/real/patch_lips.png"
     # bg_path    = "experiment/real/white.png"
     # bg_path    = "white.png"
     # image_path = "Head_Diff_old.jpg"
@@ -168,15 +154,53 @@ def main(resolution):
     # print(mesh.upper.shape)
     # import pdb;pdb.set_trace()
     
-    model_name = "girl"
+    # character_name = "girl"
+    character_name = "piers"
+    # character_name = "metahuman"
     
+    root_dir = 'experiment/mesh/{0}/0_{0}/'.format(character_name)
     # animation
-    pca_weight = np.array(torch.load('experiment/mesh/{}/0_{}/weight.pth'.format(model_name, model_name)))
-    pca_value  = np.array(torch.load('experiment/mesh/{}/0_{}/eigenvalue.pth'.format(model_name, model_name)))
-    pca_vector = np.array(torch.load('experiment/mesh/{}/0_{}/eigenvector.pth'.format(model_name, model_name)))
-    pca_mean   = np.array(torch.load('experiment/mesh/{}/0_{}/mean.pth'.format(model_name, model_name)))
-        
+    # anim_path = 'experiment/mesh/{0}/0_{0}/weight.pth'.format(character_name)
+    anim_path = root_dir + 'weight.pth'
+    if os.path.exists(anim_path):
+        pca_weight = np.array(torch.load(anim_path))
+    else:
+        anim_path = 'experiment/mesh/{0}/0_{0}/animation.pth'.format(character_name)
+        pca_weight = np.array(torch.load(anim_path))
     
+    pca_value  = np.array(torch.load('experiment/mesh/{0}/0_{0}/eigenvalue.pth'.format(character_name)))
+    pca_vector = np.array(torch.load('experiment/mesh/{0}/0_{0}/eigenvector.pth'.format(character_name)))
+    pca_mean   = np.array(torch.load('experiment/mesh/{0}/0_{0}/mean.pth'.format(character_name)))
+        
+    # tmp_obj     = load_obj("data/100/tpose/m.obj")
+    tmp_obj     = load_obj("experiment/mesh/{0}/0_{0}/neutral.obj".format(character_name))
+    mesh        = EasyDict()
+    mesh.v      = tmp_obj[0]
+    mesh.f      = tmp_obj[1].verts_idx
+    mesh.ft     = tmp_obj[1].textures_idx
+    mesh.vt     = tmp_obj[2].verts_uvs
+    mesh.vn     = tmp_obj[2].normals
+    
+    extensions = ['png', 'jpg', 'tif']
+    image_path = ""
+    for ext in extensions:
+        temp_path = os.path.join(root_dir, f"Head_Diff.{ext}")
+        if character_name in ["girl", "piers"]:
+            temp_path = os.path.join(root_dir, f"white.{ext}")
+            
+        if os.path.isfile(temp_path):
+            image_path = temp_path
+            print(f"testure image exists: {image_path}")
+            break
+        else:
+            print(f"testure image doesn't exist: {temp_path}")
+        
+    # image_path = "white.png"
+    # image_path = "white3.png"
+    bg_path1    = "experiment/real/patch_eyel.png"
+    bg_path2    = "experiment/real/patch_eyer.png"
+    bg_path3    = "experiment/real/patch_lips.png"
+                
     # upper_pca   = pkl.load(open("./pca_npy/pca_30_upper_v1.pkl",'rb'))
     # upper_mean  = upper_pca.mean_
     # upper_coef  = upper_pca.explained_variance_
@@ -190,7 +214,6 @@ def main(resolution):
     v, f, vt, ft, vn = mesh.v, mesh.f, mesh.vt, mesh.ft, mesh.vn
     # mean_ = pkl.load(open("./pca_npy/pca_30_v2.pkl",'rb')).mean_.reshape(-1, 3)
     
-    # import pdb;pdb.set_trace()
     if not glfw.init():
         return
 
@@ -214,13 +237,13 @@ def main(resolution):
     new_vt = np.concatenate((new_vt, np.ones((new_vt.shape[0],1)) ), axis=1)
                
     blendshape = np.zeros_like(pca_value)
-    new_v  = np.zeros_like(new_vt)
+    # new_v  = np.zeros_like(new_vt)
+    new_v  = v[f].reshape(-1,3)
     # new_vn = np.zeros_like(new_v)
     # vn = np.array(vn)[:, ::-1]
     new_vn = vn[f].reshape(-1,3)
     
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
-    # quad = np.concatenate( (new_v, new_vt, new_vn, new_vtan), axis=1)
     quad = np.array(quad, dtype=np.float32)
     print("quad: ",quad.shape)
     # pca_v = pca_mean + np.dot(pca_value, pca_vector.T)
@@ -389,7 +412,8 @@ def main(resolution):
     gl_alpha  = glGetUniformLocation(shader, "_alpha")
     
     # view = glm.ortho(-1.0, 2.0, -1.0, 1.0, 0.0001, 1000.0) 
-    view = glm.ortho(-1.0, 1.0, -1.0, 1.0, 0.0001, 1000.0) 
+    zoom = 1.0
+    view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
     glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
     ############################################## uniform ###############
     
@@ -423,10 +447,28 @@ def main(resolution):
         impl = GlfwRenderer(window)
     ############################################## imgui init ############
         
-    ############################################## rescale ###############
-    pca_scale = 0.45 # girl 
-    pca_center_diff = np.array([0.0, 0.0, 0.0])
-    ############################################## rescale ###############
+    ############################################## rescale ###############    
+    if character_name == "victor":
+        pca_center_diff = np.array([0.0, 0.0, 0.0])
+        pca_scale = 0.37
+    elif character_name == "girl":
+        pca_center_diff = np.array([0.0, 0.0, 0.0])
+        pca_scale = 0.45
+    elif character_name == "piers":
+        pca_center_diff = np.array([0.0, 0.6, 0.0])
+        pca_scale = 0.58
+    elif character_name == "metahuman":
+        pca_center_diff = np.array([0.0, 0.0, 0.0])
+        pca_scale = 0.35
+    elif character_name == "malcolm": 
+        pca_center_diff = np.array([0.0, 0.5, 0.0])
+        pca_scale=0.65
+    elif character_name == "mery":
+        pca_center_diff = np.array([0.0, -0.5, 0.0])
+        pca_scale=0.55
+    elif character_name == "child": 
+        pca_center_diff = np.array([0.0, 0.5, 0.0])
+        pca_scale=0.65
     
     pca_mean   = pca_mean.reshape(-1, 3)
     pca_center = pca_mean.mean(0) + pca_center_diff
@@ -435,6 +477,7 @@ def main(resolution):
     pca_mean   = pca_mean / pca_scale
     pca_vector = pca_vector / pca_scale
     pca_mean   = pca_mean.reshape(-1)
+    ############################################## rescale ###############
         
     # import pdb;pdb.set_trace()  
     while not glfw.window_should_close(window):        
@@ -454,6 +497,9 @@ def main(resolution):
         
         rotation_mat = y_rotation(rotation_)
         glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
+        
+        view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
+        glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
             
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture0)
@@ -469,6 +515,7 @@ def main(resolution):
         
         ## PCA reconstruction
         pca_v = pca_mean + np.dot(pca_vector, pca_weight[frame])
+        # import pdb;pdb.set_trace()
         
         ## translate based on upper min
         pca_v = pca_v.reshape(-1,3) # 1402 3         
@@ -487,7 +534,7 @@ def main(resolution):
                 full_v[:, 1] = full_v[:, 1] - mean_y
         full_v = full_v + trans
         
-        quad[bg_quad.shape[0]:, 0:3] = full_v[f].reshape(-1, 3)              
+        quad[bg_quad.shape[0]:, 0:3] = full_v[f].reshape(-1, 3)
         
         glBindBuffer(GL_ARRAY_BUFFER, VBO)
         glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
@@ -577,16 +624,19 @@ def main(resolution):
             clicked, transY = imgui.slider_float(label="Trans y", value=transY, min_value=-2.0,  max_value= 2.0,)
             clicked, transZ = imgui.slider_float(label="Trans z", value=transZ, min_value=-100,  max_value= 10,)
             
+            clicked, zoom = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
+            
             changed, Reset_button     = imgui.menu_item("Reset", None, Reset_button)
             clicked_save1, Save_frame = imgui.menu_item("Save frame", None, Save_frame)
             clicked_save2, Save_all   = imgui.menu_item("Save all frames", None, Save_all)
             clicked_save3, Save_stop  = imgui.menu_item("Stop save", None, Save_stop)
             
-            clicked_crop, crop       = imgui.menu_item("Crop", None, crop)
+            clicked_crop,  crop       = imgui.menu_item("Crop", None, crop)
 
                                          
             if Reset_button:
                 blendshape  = blendshape * 0
+                zoom        = 1.0
                 scaleX      = 1.0
                 scaleY      = 1.0
                 scaleZ      = 1.0
@@ -611,7 +661,7 @@ def main(resolution):
                 a = np.frombuffer(pixels, dtype=np.uint8)
                 a = a.reshape((resolution, resolution, 4))
                 
-                save_path = 'experiment/{}'.format(model_name)
+                save_path = 'experiment/{}'.format(character_name)
                 image_path= save_path + '/image'
                 mask_path = save_path + '/mask'
                 os.makedirs(image_path, exist_ok=True)
@@ -629,7 +679,7 @@ def main(resolution):
                 a = np.frombuffer(pixels, dtype=np.uint8)
                 a = a.reshape((resolution, resolution, 4))
                 
-                save_path = 'experiment/{}'.format(model_name)
+                save_path = 'experiment/{}'.format(character_name)
                 image_path= save_path + '/image'
                 mask_path = save_path + '/mask'
                 os.makedirs(image_path, exist_ok=True)
