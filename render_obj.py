@@ -10,7 +10,7 @@ from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
 import numpy as np
 from PIL import Image
-import cv2
+import glm
 from easydict import EasyDict
 
 # from testwindow import *
@@ -223,12 +223,13 @@ def computeTangentBasis(vertex, uv):
 def render(resolution=512, mesh=None):
     if mesh is None:
         # mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
-        mesh = load_obj_mesh("mean.obj")
+        mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_1.obj")
+        # mesh = load_obj_mesh("mean.obj")
     
     mesh.v      = normalize_v(mesh.v)
     
     # image_path  = "white.png"
-    image_path  = "experiment/output/tex.png"
+    image_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
     rendered    = main(mesh, resolution, image_path, timer=True)
     rendered    = rendered[::-1, :, :]
     
@@ -331,6 +332,7 @@ def main(mesh, resolution, image_path, timer=False,
 
     glfw.make_context_current(window)
         
+    # import pdb;pdb.set_trace()
     new_vt = vt[ft].reshape(-1,2)
     new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
     
@@ -389,70 +391,105 @@ def main(mesh, resolution, image_path, timer=False,
     normal = glGetAttribLocation(shader, "normal")
     glVertexAttribPointer(normal,   3, GL_FLOAT, GL_FALSE, vertex_stride, ctypes.c_void_p(24))
     glEnableVertexAttribArray(normal)
-    
-    # tangent = glGetAttribLocation(shader, "tangent")
-    # glVertexAttribPointer(tangent,   3, GL_FLOAT, GL_FALSE, vertex_stride, ctypes.c_void_p(36))
-    # glEnableVertexAttribArray(tangent)
-    
+
     ############################################## texture map ###########
-    # glEnable(GL_TEXTURE_2D)
     texture1 = load_texture(image_path)
-    # texture2 = load_texture(normal_path)
+    
+    glUseProgram(shader)
     
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture1)
-    
-    # glActiveTexture(GL_TEXTURE1);
-    # glBindTexture(GL_TEXTURE_2D, texture2)
+            
+    glUniform1i(glGetUniformLocation(shader, "texture1"), 0)   
+    ############################################## uniform ###############
+    i = 0
+    rotation_ = 0
         
-    glUseProgram(shader)
-    glUniform1i(glGetUniformLocation(shader, "texture1"), 0)
-    # glUniform1i(glGetUniformLocation(shader, "texture2"), 1)
+    scaleX = 1.0
+    scaleY = 1.0
+    scaleZ = 1.0
     
-    ############################################## render ################
+    transX = 0.0
+    transY = 0.0
+    transZ = -1.0
+    
+    Reset_button = False
+    
+    tex_alpha = 1.0
+    
+    normalize = False
+    _ratio = 1.0
+        
+    transform = glGetUniformLocation(shader, "transform")    
+    
+    gltrans3fv= glGetUniformLocation(shader, "trans")
+    glmouse2fv= glGetUniformLocation(shader, "mouse")
+        
+    glView    = glGetUniformLocation(shader, "proj")
+    gl_alpha  = glGetUniformLocation(shader, "_alpha")
+    
+    # view = glm.ortho(-1.0, 2.0, -1.0, 1.0, 0.0001, 1000.0) 
+    zoom = 1.0
+    view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.000001, 100.0) 
+    glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
+    ############################################## uniform ###############
+
+    ############################################## gl setting ############
     # glBindVertexArray(VAO)
     glClearColor(0.0, 0.0, 0.0, 0.0)
     glEnable(GL_DEPTH_TEST)
+    # glEnable(GL_BLEND);
+    # glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_CULL_FACE);
+    glFrontFace(GL_CCW); 
+    ############################################## gl setting ############
 
-    ############################################## camera ################
-    # rotation_mat = rotation(np.eye(4, dtype=np.float32), angle*-18.0, 0.0, 1.0, 0.0)
-    # rotation_mat = y_rotation(angle*-18.0)
-    # rotation_mat = y_rotation(0)
-
-    transform = glGetUniformLocation(shader, "transform")    
-    # gltimey = glGetUniformLocation(shader, "timer_y")
-    # gltimex = glGetUniformLocation(shader, "timer_x")
-
-    ############################################## imgui ################
-    imgui.create_context()
-    # window = impl_glfw_init() # already initialized!
-    impl = GlfwRenderer(window)    
-    
-    i = 0
-    rotation_angle = 180
+    ############################################## imgui #################
+    use_imgui = True
+    if use_imgui:
+        imgui.create_context()
+        # window = impl_glfw_init() # already initialized!
+        impl = GlfwRenderer(window)
+    ############################################## imgui init ############    
+        
     while not glfw.window_should_close(window):
-        # curr_time = (time.time()-start)
-        if pca_v == True:
-            new_v = mean + np.dot(coef * blendshape, basis)
-            new_v = new_v.reshape(-1,3)
-            # new_v = normalize_v(new_v)
-            # new_v[:, 2] = new_v[:, 2] * -1
-            new_v = new_v[f].reshape(-1, 3)
-            quad[:, :3] = new_v
-            glBindBuffer(GL_ARRAY_BUFFER, VBO)
-            glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
-            
-        rotation_mat = y_rotation(rotation_angle)
+        
+        ## trans * rotate * scale * 3D model
+        rotation_mat = y_rotation(rotation_)
+        affine_mat = np.eye(4)
+        affine_mat[:3,:3] = affine_mat[:3,:3] * np.array([scaleX, scaleY, scaleZ])
+        affine_mat[:3,-1] = np.array([transX, transY, transZ])
+        rotation_mat = rotation_mat @ affine_mat.T
         
         glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
+        
+        view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
+        glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
+        
+        if pca_v == True:
+            upd_v = mean + np.dot(coef * blendshape, basis)
+            upd_v = upd_v.reshape(-1,3)
+            # upd_v = normalize_v(upd_v)
+            # upd_v[:, 2] = upd_v[:, 2] * -1
+            upd_v = upd_v[f].reshape(-1, 3)
+            quad[:, :3] = upd_v
+        else:
+            upd_v = new_v
+            # upd_v = new_v * np.array([scaleX, scaleY, scaleZ])
+            # upd_v = upd_v + np.array([transX, transY, transZ])
+            quad[:, :3] = upd_v
+        
+        glBindBuffer(GL_ARRAY_BUFFER, VBO)
+        glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
+        
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glDrawArrays(GL_TRIANGLES, 0, quad.shape[0])
 
         glfw.poll_events()
-        if pca_v == True:
+        if use_imgui or pca_v:
             impl.process_inputs()
             imgui.new_frame()
-
+            imgui.text("mean vert: {}".format(upd_v.mean(0)))
             if imgui.begin_main_menu_bar():
                 if imgui.begin_menu("File", True):
 
@@ -465,26 +502,51 @@ def main(mesh, resolution, image_path, timer=False,
 
                     imgui.end_menu()
                 imgui.end_main_menu_bar()
+            
+            clicked, tex_alpha = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
+            clicked, _ratio    = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
+            clicked, rotation_ = imgui.slider_float(label="Rotate", value=rotation_, min_value=0.0, max_value=360.0,)
+            
+            clicked, scaleX = imgui.slider_float(label="Scale x",   value=scaleX, min_value= 0.1,  max_value= 10.0,)
+            changed, scaleX = imgui.input_float(label="set Scale x",value=scaleX, step=0.001)
+            clicked, scaleY = imgui.slider_float(label="Scale y",   value=scaleY, min_value= 0.1,  max_value= 10.0,)
+            changed, scaleY = imgui.input_float(label="set Scale y",value=scaleY, step=0.001)
+            clicked, scaleZ = imgui.slider_float(label="Scale z",   value=scaleZ, min_value= 0.1,  max_value= 10.0,)
+            
+            clicked, transX = imgui.slider_float(label="Trans x",   value=transX, min_value=-5.0,  max_value= 5.0,)
+            changed, transX = imgui.input_float(label="set Trans x",value=transX, step=0.001)
+            clicked, transY = imgui.slider_float(label="Trans y",   value=transY, min_value=-5.0,  max_value= 5.0,)
+            changed, transY = imgui.input_float(label="set Trans y",value=transY, step=0.001)
+            clicked, transZ = imgui.slider_float(label="Trans z",   value=transZ, min_value=-100,  max_value= 10,)
+            changed, transZ = imgui.input_float(label="set Trans z",value=transZ, step=0.001)
+            
+            clicked, zoom   = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
+            changed, Reset_button     = imgui.menu_item("Reset", None, Reset_button)
+            
+            if Reset_button:
+                if pca_v == True:
+                    blendshape  = blendshape * 0
+                zoom        = 1.0
+                scaleX      = 1.0
+                scaleY      = 1.0
+                scaleZ      = 1.0
+                transX      = 0.0
+                transY      = 0.0
+                transZ      = 0.0
+                rotation_   = 0
+                normalize   = False
+                Reset_button= False
                 
-            # rotation_angle, blendshape = show_example_slider(rotation_angle, blendshape)
-            imgui.menu_item(label="(dummy menu)", shortcut=None, selected=False, enabled=False)
-            clicked, rotation_angle = imgui.slider_float(
-                    label="Rotate",
-                    value=rotation_angle,
-                    min_value = 0.0,
-                    max_value = 360.0,
-                )
-            for i in range(len(blendshape)):    
-                clicked, blendshape[i] = imgui.slider_float(
-                    label="Value"+ str(i),
-                    value=blendshape[i],
-                    # min_value=-1.0 if i >= 1 else 0.0,
-                    min_value = -1.0,
-                    max_value =  1.0,
-                )
-                
-            rotation_angle = rotation_angle % 360
-            # show_test_window()
+            rotation_ = rotation_ % 360
+            
+            if pca_v == True:
+                for i in range(len(blendshape)):    
+                    clicked, blendshape[i] = imgui.slider_float(
+                        label="Value"+ str(i),
+                        value=blendshape[i],
+                        min_value = -1.0,
+                        max_value =  1.0,
+                    )
             
             imgui.render()
             impl.render(imgui.get_draw_data())
@@ -503,12 +565,14 @@ def main(mesh, resolution, image_path, timer=False,
         # i = i + 10
         
         # break
-    if pca_v == True:
+    ################################################## imgui end ############
+    if use_imgui or pca_v:
         impl.shutdown()
+    ################################################## imgui end ############
     glfw.terminate()
     return a
 
 if __name__ == '__main__':
-    render(resolution=512)
+    render(resolution=1024)
     # data_render(resolution=512)
 
