@@ -10,6 +10,8 @@ uniform sampler2D texture0; // texture
 uniform sampler2D texture1; // ref image eye left
 uniform sampler2D texture2; // ref image eye right
 uniform sampler2D texture3; // ref image lips
+uniform sampler2D texture4; // ref image lips
+uniform sampler2D texture5; // ref image lips
 
 uniform mat4 transform;
 
@@ -22,6 +24,8 @@ uniform vec2 mouse;
 
 uniform vec3 m_ldm1;
 uniform vec3 m_ldm2;
+uniform vec3 m_ldm3;
+uniform vec3 m_ldm4;
 
 void main()
 {
@@ -40,6 +44,12 @@ void main()
         }
         else if (show_bg == 3.0f){
             tex_col  = texture(texture3, uv);
+        }
+        else if (show_bg == 4.0f){
+            tex_col  = texture(texture4, uv);
+        }
+        else if (show_bg == 5.0f){
+            tex_col  = texture(texture5, uv);
         }
 
     float zero = 0.000000001;
@@ -95,15 +105,25 @@ void main()
     // }
 
     if (show_ldm == 1.0f){
-        vec2 ldm1dir = worldPosition.xy - m_ldm1.xy;
-        float ldm1Dis = ldm1dir.x * ldm1dir.x + ldm1dir.y * ldm1dir.y;
-        if (sqrt(ldm1Dis) < 0.02f){
+        vec2 ldm_dir = worldPosition.xy - m_ldm1.xy;
+        float ldm_Dis = ldm_dir.x * ldm_dir.x + ldm_dir.y * ldm_dir.y;
+        if (sqrt(ldm_Dis) < 0.02f){
             OutColor = vec4(0.0f, 0.0f, 1.0f, 1.0f);
         }
-        vec2 ldm2dir = worldPosition.xy - m_ldm2.xy;
-        float ldm2Dis = ldm2dir.x * ldm2dir.x + ldm2dir.y * ldm2dir.y;
-        if (sqrt(ldm2Dis) < 0.02f){
+        ldm_dir = worldPosition.xy - m_ldm2.xy;
+        ldm_Dis = ldm_dir.x * ldm_dir.x + ldm_dir.y * ldm_dir.y;
+        if (sqrt(ldm_Dis) < 0.02f){
             OutColor = vec4(0.0f, 0.5f, 1.0f, 1.0f);
+        }
+        ldm_dir = worldPosition.xy - m_ldm3.xy;
+        ldm_Dis = ldm_dir.x * ldm_dir.x + ldm_dir.y * ldm_dir.y;
+        if (sqrt(ldm_Dis) < 0.02f){
+            OutColor = vec4(0.0f, 0.5f, 0.5f, 1.0f);
+        }
+        ldm_dir = worldPosition.xy - m_ldm4.xy;
+        ldm_Dis = ldm_dir.x * ldm_dir.x + ldm_dir.y * ldm_dir.y;
+        if (sqrt(ldm_Dis) < 0.02f){
+            OutColor = vec4(0.0f, 1.0f, 0.0f, 1.0f);
         }
     }
 }

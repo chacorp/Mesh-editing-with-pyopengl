@@ -21,7 +21,7 @@ import sys
 import pickle as pkl
 import glm
 import torch
-from pytorch3d.io import load_obj
+from pytorch3d.io import load_obj, save_obj
 from pytorch3d.renderer import (
     TexturesUV,
     TexturesVertex,
@@ -154,8 +154,12 @@ def main(resolution):
     # print(mesh.upper.shape)
     # import pdb;pdb.set_trace()
     
-    # character_name = "girl"
-    character_name = "piers"
+    character_name = "girl"
+    # character_name = "piers"
+    # part = "eye_brow_r"
+    part = "figure"
+    # part = "eye_brow_r"
+    # character_name = "piers"
     # character_name = "metahuman"
     
     root_dir = 'experiment/mesh/{0}/0_{0}/'.format(character_name)
@@ -167,6 +171,8 @@ def main(resolution):
     else:
         anim_path = 'experiment/mesh/{0}/0_{0}/animation.pth'.format(character_name)
         pca_weight = np.array(torch.load(anim_path))
+    # pca_weight = np.array(torch.load("D:/test/RaBit/experiment/girl.pth").cpu())   
+    # pca_weight = np.array(torch.load("D:/test/RaBit/experiment/piers.pth").cpu())   
     
     pca_value  = np.array(torch.load('experiment/mesh/{0}/0_{0}/eigenvalue.pth'.format(character_name)))
     pca_vector = np.array(torch.load('experiment/mesh/{0}/0_{0}/eigenvector.pth'.format(character_name)))
@@ -182,34 +188,35 @@ def main(resolution):
     mesh.vn     = tmp_obj[2].normals
     
     extensions = ['png', 'jpg', 'tif']
-    image_path = ""
+    tex_path = ""
     for ext in extensions:
         temp_path = os.path.join(root_dir, f"Head_Diff.{ext}")
         if character_name in ["girl", "piers"]:
             temp_path = os.path.join(root_dir, f"white.{ext}")
             
         if os.path.isfile(temp_path):
-            image_path = temp_path
-            print(f"testure image exists: {image_path}")
+            tex_path = temp_path
+            print(f"testure image exists: {tex_path}")
             break
         else:
             print(f"testure image doesn't exist: {temp_path}")
         
-    # image_path = "white.png"
-    # image_path = "white3.png"
+    # tex_path = "white.png"
+    # tex_path = "white3.png"
     bg_path1    = "experiment/real/patch_eyel.png"
     bg_path2    = "experiment/real/patch_eyer.png"
-    bg_path3    = "experiment/real/patch_lips.png"
-                
-    # upper_pca   = pkl.load(open("./pca_npy/pca_30_upper_v1.pkl",'rb'))
-    # upper_mean  = upper_pca.mean_
-    # upper_coef  = upper_pca.explained_variance_
-    # upper_basis = upper_pca.components_
+    # bg_path3    = "experiment/real/patch_lips.png"
+    bg_path3    = "experiment/real/patch_lips_.png"
+    bg_path4    = "experiment/real/patch_eye_brow_l.png"
+    bg_path5    = "experiment/real/patch_eye_brow_r.png"
     
-    # lower_pca   = pkl.load(open("./pca_npy/pca_30_lower_v1.pkl",'rb'))
-    # lower_mean  = lower_pca.mean_
-    # lower_coef  = lower_pca.explained_variance_
-    # lower_basis = lower_pca.components_
+    save_path = 'experiment/{}/{}'.format(character_name, part)
+    # save_path = 'experiment/{}/{}'.format(character_name, part)
+    image_path= save_path + '/image'
+    mask_path = save_path + '/mask'
+    os.makedirs(image_path, exist_ok=True)
+    os.makedirs(mask_path,  exist_ok=True)
+    
         
     v, f, vt, ft, vn = mesh.v, mesh.f, mesh.vt, mesh.ft, mesh.vn
     # mean_ = pkl.load(open("./pca_npy/pca_30_v2.pkl",'rb')).mean_.reshape(-1, 3)
@@ -232,28 +239,28 @@ def main(resolution):
         return
 
     glfw.make_context_current(window)
-        
-    new_vt = vt[ft].reshape(-1,2)
-    new_vt = np.concatenate((new_vt, np.ones((new_vt.shape[0],1)) ), axis=1)
+    
+    new_vt = vt[ft].reshape(-1, 2)
+    new_vt = np.concatenate((
+        new_vt, 
+        np.ones((new_vt.shape[0], 1))
+    ), axis=1)
                
     blendshape = np.zeros_like(pca_value)
     # new_v  = np.zeros_like(new_vt)
     new_v  = v[f].reshape(-1,3)
-    # new_vn = np.zeros_like(new_v)
+    new_vn = np.zeros_like(new_v)
     # vn = np.array(vn)[:, ::-1]
-    new_vn = vn[f].reshape(-1,3)
+    # new_vn = vn[f].reshape(-1,3)
     
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
     quad = np.array(quad, dtype=np.float32)
-    print("quad: ",quad.shape)
-    # pca_v = pca_mean + np.dot(pca_value, pca_vector.T)
-    # pca_v = pca_v.reshape(-1,3)
-    
+    print("quad: ", quad.shape)
     
     ### background
     # import pdb;pdb.set_trace()
     bg_quad = np.array([
-        #   positions      texture coords      normals
+        #    positions       texture coords       normals
         [-1.0, -1.0, -1.0,   0.0, 0.0, -1.0,   0.0, 0.0, 0.0],   # bottom left
         [ 1.0,  1.0, -1.0,   1.0, 1.0, -1.0,   0.0, 0.0, 0.0],   # top right
         [-1.0,  1.0, -1.0,   0.0, 1.0, -1.0,   0.0, 0.0, 0.0],   # top left 
@@ -262,7 +269,7 @@ def main(resolution):
         [ 1.0, -1.0, -1.0,   1.0, 0.0, -1.0,   0.0, 0.0, 0.0],   # bottom right
         [ 1.0,  1.0, -1.0,   1.0, 1.0, -1.0,   0.0, 0.0, 0.0],   # top right
     ], dtype=np.float32)
-    print("bg_quad: ",bg_quad.shape)
+    print("bg_quad: ", bg_quad.shape)
     
     quad = np.concatenate((bg_quad, quad), axis=0)
     
@@ -330,10 +337,12 @@ def main(resolution):
     
     ############################################## texture map ###########
     # glEnable(GL_TEXTURE_2D)
-    texture0 = load_texture(image_path)
+    texture0 = load_texture(tex_path)
     texture1 = load_texture(bg_path1)
     texture2 = load_texture(bg_path2)
     texture3 = load_texture(bg_path3)
+    texture4 = load_texture(bg_path4)
+    texture5 = load_texture(bg_path5)
     # texture1 = load_texture(bg_path)
     # texture2 = load_texture(image_path)
     
@@ -343,17 +352,21 @@ def main(resolution):
     
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, texture1)
-    
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, texture2)
-    
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, texture3)
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, texture4)
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, texture5)
     
     glUniform1i(glGetUniformLocation(shader, "texture0"), 0)
     glUniform1i(glGetUniformLocation(shader, "texture1"), 1)
     glUniform1i(glGetUniformLocation(shader, "texture2"), 2)
     glUniform1i(glGetUniformLocation(shader, "texture3"), 3)
+    glUniform1i(glGetUniformLocation(shader, "texture4"), 4)
+    glUniform1i(glGetUniformLocation(shader, "texture5"), 5)
     ############################################## texture map ###########
     
     ############################################## uniform ###############
@@ -387,15 +400,20 @@ def main(resolution):
     region_x = -100
     region_y = -100
     
-    crop = False
+    select_ldm = False
+    normalize = False
     _ratio = 1.0
     
+    ldm_shift  = 0
+    show_ldm   = False
     m_ldm1     = np.array([-10.0, -10.0, -10.0])
     m_ldm2     = np.array([-10.0, -10.0, -10.0])
-    ldm_shift  = False
-    show_ldm   = False
+    m_ldm3     = np.array([-10.0, -10.0, -10.0])
+    m_ldm4     = np.array([-10.0, -10.0, -10.0])
     m_ldm1_idx = 0
     m_ldm2_idx = 0
+    m_ldm3_idx = 0
+    m_ldm4_idx = 0
     
     transform = glGetUniformLocation(shader, "transform")    
     
@@ -404,6 +422,8 @@ def main(resolution):
     
     gl_ldm1   = glGetUniformLocation(shader, "m_ldm1")
     gl_ldm2   = glGetUniformLocation(shader, "m_ldm2")
+    gl_ldm3   = glGetUniformLocation(shader, "m_ldm3")
+    gl_ldm4   = glGetUniformLocation(shader, "m_ldm4")
     glshow_ldm= glGetUniformLocation(shader, "show_ldm")
     
     glView    = glGetUniformLocation(shader, "proj")
@@ -462,13 +482,13 @@ def main(resolution):
         pca_scale = 0.35
     elif character_name == "malcolm": 
         pca_center_diff = np.array([0.0, 0.5, 0.0])
-        pca_scale=0.65
+        pca_scale = 0.65
     elif character_name == "mery":
         pca_center_diff = np.array([0.0, -0.5, 0.0])
-        pca_scale=0.55
+        pca_scale = 0.55
     elif character_name == "child": 
         pca_center_diff = np.array([0.0, 0.5, 0.0])
-        pca_scale=0.65
+        pca_scale = 0.65
     
     pca_mean   = pca_mean.reshape(-1, 3)
     pca_center = pca_mean.mean(0) + pca_center_diff
@@ -489,6 +509,8 @@ def main(resolution):
                         
         glUniform3fv(gl_ldm1, 1, m_ldm1)
         glUniform3fv(gl_ldm2, 1, m_ldm2)
+        glUniform3fv(gl_ldm3, 1, m_ldm3)
+        glUniform3fv(gl_ldm4, 1, m_ldm4)
         
         glUniform1f(glshow_ldm, show_ldm)
         glUniform1f(glshow_bg,  show_bg)
@@ -506,32 +528,63 @@ def main(resolution):
         
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, texture1)
-        
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, texture2)
-        
         glActiveTexture(GL_TEXTURE3);
         glBindTexture(GL_TEXTURE_2D, texture3)
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, texture4)
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, texture5)
         
         ## PCA reconstruction
+        # frame = 2668
         pca_v = pca_mean + np.dot(pca_vector, pca_weight[frame])
         # import pdb;pdb.set_trace()
         
         ## translate based on upper min
-        pca_v = pca_v.reshape(-1,3) # 1402 3         
-        full_v = pca_v * np.array([scaleX, scaleY, scaleZ])
-                
+        pca_v = pca_v.reshape(-1,3) # 1402 3
+        
+        # save_obj(f"{character_name}_{frame}.obj", torch.tensor(pca_v),torch.tensor(f))
+        # break
+        full_v = pca_v
         if m_ldm1.mean() != -10.0 or m_ldm2.mean() != -10.0:
-            if crop:
+            if normalize:
                 min_x  = min(full_v[m_ldm1_idx][0], full_v[m_ldm2_idx][0])
                 max_x  = max(full_v[m_ldm1_idx][0], full_v[m_ldm2_idx][0])
                 mean_y = (full_v[m_ldm1_idx][1] + full_v[m_ldm2_idx][1]) * 0.5
                 
-                # re-scaling
+                # normalize based on x
                 full_v[:, 0] = full_v[:,0] - min_x
                 full_v[:, 0] = full_v[:, 0] / (max_x - min_x) * 2 - 1
                 full_v[:, 0] = full_v[:, 0] * _ratio
                 full_v[:, 1] = full_v[:, 1] - mean_y
+                
+                
+                # min_xx = np.array([min_x, min_x])
+                # max_xx = np.array([max_x, max_x])
+                # # normalize based on x
+                # # full_v[:, :2] = full_v[:, :2]
+                # mean_y = mean_y - min_x / (max_x - min_x) * 2 - 1
+                # full_v[:, :2] = full_v[:, :2] - min_xx / (max_xx - min_xx) * 2 - 1
+                # full_v[:, :2] = full_v[:, :2] * _ratio
+                # full_v[:, 1] = full_v[:, 1] - mean_y 
+                
+                # # normalize x y
+                # min_x = full_v[[m_ldm1_idx,m_ldm2_idx,m_ldm3_idx,m_ldm4_idx]][:,0].min()
+                # max_x = full_v[[m_ldm1_idx,m_ldm2_idx,m_ldm3_idx,m_ldm4_idx]][:,0].max()
+                # min_y = full_v[[m_ldm1_idx,m_ldm2_idx,m_ldm3_idx,m_ldm4_idx]][:,1].min()
+                # max_y = full_v[[m_ldm1_idx,m_ldm2_idx,m_ldm3_idx,m_ldm4_idx]][:,1].max()
+                
+                # full_v[:, 0] = full_v[:, 0] / (max_x - min_x) * 2 - 1
+                # full_v[:, 1] = full_v[:, 1] / (max_y - min_y) * 2 - 1
+                # # full_v[:, :2] = full_v[:, :2] - min_xy / (max_xy - min_xy) # * 2 - 1
+                # full_v[:, :2] = full_v[:, :2] * _ratio
+                # mean_xy = full_v[[m_ldm1_idx,m_ldm2_idx,m_ldm3_idx,m_ldm4_idx]].mean(0)
+                # full_v[:, :2] = full_v[:, :2] - mean_xy[:2]
+                                
+                # normalize = False
+        full_v = full_v * np.array([scaleX, scaleY, scaleZ])
         full_v = full_v + trans
         
         quad[bg_quad.shape[0]:, 0:3] = full_v[f].reshape(-1, 3)
@@ -567,48 +620,60 @@ def main(resolution):
             region_x = (imgui.get_mouse_position().x / resolution) * 2 - 1
             region_y = (imgui.get_mouse_position().y / resolution) * -2 + 1
             
-            if imgui.is_mouse_double_clicked(0):
+            if imgui.is_mouse_double_clicked(0) and select_ldm:
                 region_xy = np.array([region_x, region_y])
                 # print(region_xy.shape)
                 condition = np.linalg.norm(full_v[:, :2] - region_xy, axis=1)
                 # print(condition.shape)
                 show_ldm = True
-                if not ldm_shift:
+                if ldm_shift == 0:
                     m_ldm1_idx = condition.argmin()                
-                    ldm_shift = True
-                else:
+                    ldm_shift = ldm_shift +1
+                elif ldm_shift == 1:
                     m_ldm2_idx = condition.argmin()                
-                    ldm_shift = False
+                    # ldm_shift = ldm_shift +1
+                    ldm_shift = 0
+                # elif ldm_shift == 2:
+                #     m_ldm3_idx = condition.argmin()                
+                #     ldm_shift = ldm_shift +1
+                # else:
+                #     m_ldm4_idx = condition.argmin()                
+                #     ldm_shift = 0
+                    
             if show_ldm:
                 m_ldm1 = full_v[m_ldm1_idx]
                 m_ldm2 = full_v[m_ldm2_idx]
+                m_ldm3 = full_v[m_ldm3_idx]
+                m_ldm4 = full_v[m_ldm4_idx]
             
             imgui.text("ldm_1: {} {}".format(m_ldm1_idx, m_ldm1))
             imgui.text("ldm_2: {} {}".format(m_ldm2_idx, m_ldm2))
+            # imgui.text("ldm_3: {} {}".format(m_ldm3_idx, m_ldm3))
+            # imgui.text("ldm_4: {} {}".format(m_ldm4_idx, m_ldm4))
             # imgui.text("region_x: {}".format(region_x))
             # imgui.text("region_y: {}".format(region_y))
 
-            clicked_ldm_, show_ldm = imgui.menu_item("Show landmark", None, show_ldm)
-            clicked_bg, show_m     = imgui.menu_item("Show Model", None, show_m)
+            clicked_ldm_, select_ldm= imgui.menu_item("Select landmark", None, select_ldm)
+            clicked_ldm_, show_ldm  = imgui.menu_item("Show landmark", None, show_ldm)
+            clicked_bg, show_m      = imgui.menu_item("Show Model", None, show_m)
             if show_m:
                 show_m = 1
             else:
                 show_m = 0
              
-            clicked_bg, use_bg     = imgui.menu_item("Show reference", None, use_bg)
-            changed, show_bg       = imgui.input_int(label="reference", value=show_bg, step=1)
-            if show_bg > 3:
+            clicked_bg, use_bg      = imgui.menu_item("Show reference", None, use_bg)
+            changed, show_bg        = imgui.input_int(label="reference", value=show_bg, step=1)
+            if show_bg > 5:
                 show_bg = 0 
             if use_bg:
                 if show_bg == 0:
                     show_bg = 1
             else:
-                show_bg = 0            
-
+                show_bg = 0
             
-            clicked, tex_alpha = imgui.slider_float(label="_alpha", value=tex_alpha, min_value=0.0, max_value=1.0)
-            clicked, _ratio    = imgui.slider_float(label="_ratio", value=_ratio, min_value=0.0, max_value=1.0)
-            clicked, frame     = imgui.slider_int(label="frame", value=frame, min_value=min_frame, max_value=max_frame)
+            clicked, tex_alpha = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
+            clicked, _ratio    = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
+            clicked, frame     = imgui.slider_int(label="frame",       value=frame, min_value=min_frame, max_value=max_frame)
             changed, frame     = imgui.input_int(label="select frame", value=frame, step=1)
             # clicked, rotation_ = imgui.slider_float(label="Rotate", value=rotation_, min_value=0.0, max_value=360.0,)
             
@@ -617,21 +682,25 @@ def main(resolution):
             if frame > max_frame:
                 frame = max_frame
             
-            clicked, scaleX = imgui.slider_float(label="Scale x", value=scaleX, min_value= 0.1,  max_value= 10.0,)
-            clicked, scaleY = imgui.slider_float(label="Scale y", value=scaleY, min_value= 0.1,  max_value= 10.0,)
-            clicked, scaleZ = imgui.slider_float(label="Scale z", value=scaleZ, min_value= 0.1,  max_value= 10.0,)
-            clicked, transX = imgui.slider_float(label="Trans x", value=transX, min_value=-2.0,  max_value= 2.0,)
-            clicked, transY = imgui.slider_float(label="Trans y", value=transY, min_value=-2.0,  max_value= 2.0,)
-            clicked, transZ = imgui.slider_float(label="Trans z", value=transZ, min_value=-100,  max_value= 10,)
+            clicked, scaleX = imgui.slider_float(label="Scale x",   value=scaleX, min_value= 0.1,  max_value= 10.0,)
+            changed, scaleX = imgui.input_float(label="set Scale x",value=scaleX, step=0.001)
+            clicked, scaleY = imgui.slider_float(label="Scale y",   value=scaleY, min_value= 0.1,  max_value= 10.0,)
+            changed, scaleY = imgui.input_float(label="set Scale y",value=scaleY, step=0.001)
+            clicked, scaleZ = imgui.slider_float(label="Scale z",   value=scaleZ, min_value= 0.1,  max_value= 10.0,)
             
-            clicked, zoom = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
+            clicked, transX = imgui.slider_float(label="Trans x",   value=transX, min_value=-5.0,  max_value= 5.0,)
+            changed, transX = imgui.input_float(label="set Trans x",value=transX, step=0.001)
+            clicked, transY = imgui.slider_float(label="Trans y",   value=transY, min_value=-5.0,  max_value= 5.0,)
+            changed, transY = imgui.input_float(label="set Trans y",value=transY, step=0.001)
+            clicked, transZ = imgui.slider_float(label="Trans z",   value=transZ, min_value=-100,  max_value= 10,)
+            
+            clicked, zoom   = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
             
             changed, Reset_button     = imgui.menu_item("Reset", None, Reset_button)
             clicked_save1, Save_frame = imgui.menu_item("Save frame", None, Save_frame)
             clicked_save2, Save_all   = imgui.menu_item("Save all frames", None, Save_all)
             clicked_save3, Save_stop  = imgui.menu_item("Stop save", None, Save_stop)
-            
-            clicked_crop,  crop       = imgui.menu_item("Crop", None, crop)
+            clicked_norm, normalize   = imgui.menu_item("Normalize", None, normalize)
 
                                          
             if Reset_button:
@@ -645,8 +714,9 @@ def main(resolution):
                 transZ      = -10.0
                 frame       = 0
                 rotation_   = 0
-                crop        = False
+                normalize   = False
                 show_ldm    = False
+                select_ldm  = False
                 Reset_button= False
             
             if Save_stop:
@@ -661,7 +731,7 @@ def main(resolution):
                 a = np.frombuffer(pixels, dtype=np.uint8)
                 a = a.reshape((resolution, resolution, 4))
                 
-                save_path = 'experiment/{}'.format(character_name)
+                save_path = 'experiment/{}/{}'.format(character_name,part)
                 image_path= save_path + '/image'
                 mask_path = save_path + '/mask'
                 os.makedirs(image_path, exist_ok=True)
@@ -670,7 +740,13 @@ def main(resolution):
                 Image.fromarray(a[::-1, :,  3]).save('{}/local_patch_mask{:06}.png'.format(mask_path, frame))
                 
                 Save_frame = False
-                print("frame: {}\nscale x: {}\nscale y: {}\ntrans x: {}\ntrans x: {}\n".format(frame, scaleX, scaleY, transX, transY))
+                print("frame: {}\nscale x: {}\nscale y: {}\ntrans x: {}\ntrans y: {}\nratio: {}\nLDM 1: {}\nLDM 2: {}\n".format(
+                    frame, scaleX, scaleY, transX, transY, _ratio, m_ldm1_idx, m_ldm2_idx))
+                save_obj(f"{character_name}_{frame}.obj", 
+                         torch.tensor(pca_v),
+                         mesh.f.clone().detach(),
+                         verts_uvs=mesh.vt.clone().detach(),
+                         faces_uvs=mesh.ft.clone().detach())
                 # frame = frame + 1
             
             if Save_all:
@@ -679,11 +755,6 @@ def main(resolution):
                 a = np.frombuffer(pixels, dtype=np.uint8)
                 a = a.reshape((resolution, resolution, 4))
                 
-                save_path = 'experiment/{}'.format(character_name)
-                image_path= save_path + '/image'
-                mask_path = save_path + '/mask'
-                os.makedirs(image_path, exist_ok=True)
-                os.makedirs(mask_path,  exist_ok=True)
                 Image.fromarray(a[::-1, :, :3]).save('{}/local_patch{:06}.png'.format(image_path, frame))
                 Image.fromarray(a[::-1, :,  3]).save('{}/local_patch_mask{:06}.png'.format(mask_path, frame))
                 
