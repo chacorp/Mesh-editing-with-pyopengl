@@ -17,6 +17,8 @@ from easydict import EasyDict
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
 import sys
+from pytorch3d.io import load_obj, save_obj
+import json
 
 def compute_face_norm(vn, f):
     v1 = vn[f:, 0]
@@ -91,14 +93,14 @@ def load_textures(filenames):
 
 def load_texture(path):
     texture = glGenTextures(1)
-    print(texture)
+    print("texture buffer: ",texture)
     glBindTexture(GL_TEXTURE_2D, texture)
     image = Image.open(path)
     image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).convert('RGB') # 'RGBA
     image_data = np.array(list(image.getdata()), np.uint8)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.width, image.height, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
     glGenerateMipmap(GL_TEXTURE_2D)
-    glBindTexture(GL_TEXTURE_2D, 0)
+    glBindTexture(GL_TEXTURE_2D, texture)
     return texture
 
 
@@ -152,6 +154,7 @@ def load_obj_mesh(mesh_path):
     vertex_texture = []
     face_data = []
     face_texture = []
+    face_normal = []
     for line in open(mesh_path, "r"):
         if line.startswith('#'):
             continue
@@ -171,15 +174,19 @@ def load_obj_mesh(mesh_path):
             # import pdb; pdb.set_trace()
             f = list(map(lambda x: int(x.split('/')[0]),  values[1:]))
             face_data.append(f)
-            if len(values[1].split('/')) > 1:
+            if len(values[1].split('/')) >=2:
                 ft = list(map(lambda x: int(x.split('/')[1]),  values[1:]))
                 face_texture.append(ft)
+            if len(values[1].split('/')) >=3:
+                ft = list(map(lambda x: int(x.split('/')[2]),  values[1:]))
+                face_normal.append(ft)
     # mesh.v  = np.array(vertex_data)
     mesh.v  = normalize_v(np.array(vertex_data))
     mesh.vn = np.array(vertex_normal)
     mesh.vt = np.array(vertex_texture)
     mesh.f  = np.array(face_data) -1
-    mesh.ft  = np.array(face_texture) -1
+    mesh.ft = np.array(face_texture) -1
+    mesh.fn = np.array(face_normal) -1
     return mesh
 
 def vertex_normal(v1, v2, v3):
@@ -223,21 +230,66 @@ def computeTangentBasis(vertex, uv):
 def render(resolution=512, mesh=None):
     if mesh is None:
         # mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
-        mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_1.obj")
+        
+        ### high res smpl mesh
+        mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
+        
+        ### smpl mesh
+        # mesh = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
+        
+        ### mignle mesh
+        # mesh = load_obj_mesh("N:/01-Projects/2023_KOCCA_AvatarFashion/10_data/Avatar_00_no_hair.obj")
+        # mesh_ = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
+        
+        ### mignle hres mesh
+        # mesh = load_obj_mesh("D:/test/RaBit/experiment/mingle/hres_to_Avatar_00.obj")
+        # mesh_ = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
+        # mesh.vn = mesh_.vn
+        # mesh.fn = mesh_.fn
+        
         # mesh = load_obj_mesh("mean.obj")
+        # tmp_obj = load_obj("experiment/smpl_hres/smpl_hres_mesh_2.obj")
+        # mesh        = EasyDict()
+        # mesh.v      = tmp_obj[0]
+        # mesh.f      = tmp_obj[1].verts_idx
+        # mesh.ft     = tmp_obj[1].textures_idx
+        # mesh.vt     = tmp_obj[2].verts_uvs
+        # mesh.vn     = tmp_obj[2].normals
     
     mesh.v      = normalize_v(mesh.v)
     
     # image_path  = "white.png"
-    image_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
-    rendered    = main(mesh, resolution, image_path, timer=True)
+    boundary_mask_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
+    
+    num = 12 # long pants
+    num = 315 # long pants
+    num = 38243 # short pants
+    # num = 39417 # short pants
+    
+    base_path = "M:\\SihunCha\\Publication\\[EG_2023]\\9_fast_forward"
+    if 1:
+        image_path= base_path + "\\re_try\\infer\\Refiner-Sampler4-new-2\\final texture\\image_{:06}_output.png".format(num)
+        disp_path = base_path + "\\re_try\\displacement\\image_{:06}_refine_smpld.json_crop_displacement_map.png".format(num)
+        json_file = base_path + "\\re_try\\displacement\\json\\image_{:06}_refine_smpld.json".format(num)
+        with open(json_file) as f:
+            json_object = json.load(f)
+    else:
+        disp_path = None
+        json_object = None
+    
+        
+    # rendered    = main(mesh, resolution, image_path, timer=True)
+    rendered    = main(mesh, resolution, image_path, disp_path, json_object, boundary_mask_path, timer=True)
+    # rendered    = main(mesh, resolution, image_path, disp_path=None, json_object=None, timer=True)
     rendered    = rendered[::-1, :, :]
     
     # make directory
-    savefolder  = join('output')
+    savefolder  = join('output_mingle')
     if not exists(savefolder):
         os.makedirs(savefolder)
-    savefile    = join(savefolder, 'rendered.png')
+    # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(num))
+    savefile    = join(savefolder, 'rendered_test_{:06}.png'.format(num))
+    # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(0))
 
     Image.fromarray(rendered).save(savefile)
     return
@@ -306,14 +358,14 @@ def pca_render(mean, coef, basis, uvs, vn, faces, ft, resolution=512):
     Image.fromarray(rendered).save(savefile)
     return
 
-def main(mesh, resolution, image_path, timer=False, 
+def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundary_mask_path=None, timer=False, 
          pca_v=False, mean=None, coef=None, basis=None):
     if timer == True:
         import time
         start = time.time()
     
     v, f, vt, ft, vn = mesh.v, mesh.f, mesh.vt, mesh.ft, mesh.vn
-
+    
     if not glfw.init():
         return
 
@@ -331,8 +383,7 @@ def main(mesh, resolution, image_path, timer=False,
         return
 
     glfw.make_context_current(window)
-        
-    # import pdb;pdb.set_trace()
+
     new_vt = vt[ft].reshape(-1,2)
     new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
     
@@ -342,13 +393,13 @@ def main(mesh, resolution, image_path, timer=False,
     else:
         new_v  = v[f].reshape(-1, 3)
     
-    # new_vn = vn[f].reshape(-1, 3)
-    new_vn = np.zeros_like(new_v)
-    
+    # import pdb;pdb.set_trace()
+    if f.max() == vn.shape[0]:
+        new_vn = vn[mesh.fn].reshape(-1, 3)
+    else:
+        new_vn = vn[f].reshape(-1, 3)
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
-    # quad = np.concatenate( (new_v, new_vt, new_vn, new_vtan), axis=1)
     quad = np.array(quad, dtype=np.float32)
-    # print(quad.shape)
 
     ############################################## shader ################
     vertex_shader_source   = open('shader.vs', 'r').read()
@@ -393,14 +444,16 @@ def main(mesh, resolution, image_path, timer=False,
     glEnableVertexAttribArray(normal)
 
     ############################################## texture map ###########
-    texture1 = load_texture(image_path)
     
     glUseProgram(shader)
-    
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture1)
-            
-    glUniform1i(glGetUniformLocation(shader, "texture1"), 0)   
+                
+    texture0 = load_texture(image_path)
+    glUniform1i(glGetUniformLocation(shader, "texture0"), 0)
+    if disp_path:
+        texture1 = load_texture(disp_path)
+        glUniform1i(glGetUniformLocation(shader, "texture1"), 1)
+    if boundary_mask_path:
+        textureB = load_texture(boundary_mask_path)
     ############################################## uniform ###############
     i = 0
     rotation_ = 0
@@ -419,11 +472,18 @@ def main(mesh, resolution, image_path, timer=False,
     
     normalize = False
     _ratio = 1.0
-        
-    transform = glGetUniformLocation(shader, "transform")    
     
-    gltrans3fv= glGetUniformLocation(shader, "trans")
-    glmouse2fv= glGetUniformLocation(shader, "mouse")
+    if json_object:
+        d_range = json_object['d_range']
+        d_range_0 = np.zeros_like(d_range)
+        gl_d_range   = glGetUniformLocation(shader, "d_range")
+        use_disp = True
+    
+    onoff_tex = True
+    
+    scale   = glGetUniformLocation(shader, "scale") # scale rotate translate
+    transform = glGetUniformLocation(shader, "transform")
+    translate = glGetUniformLocation(shader, "trans")
         
     glView    = glGetUniformLocation(shader, "proj")
     gl_alpha  = glGetUniformLocation(shader, "_alpha")
@@ -440,8 +500,8 @@ def main(mesh, resolution, image_path, timer=False,
     glEnable(GL_DEPTH_TEST)
     # glEnable(GL_BLEND);
     # glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_CULL_FACE);
-    glFrontFace(GL_CCW); 
+    # glEnable(GL_CULL_FACE);
+    # glFrontFace(GL_CCW); 
     ############################################## gl setting ############
 
     ############################################## imgui #################
@@ -454,14 +514,34 @@ def main(mesh, resolution, image_path, timer=False,
         
     while not glfw.window_should_close(window):
         
+        if onoff_tex:
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture0)
+        else:
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, textureB)
+        
+        if json_object:
+            if use_disp:
+                glUniform3fv(gl_d_range, 1, d_range)
+            else:
+                glUniform3fv(gl_d_range, 1, d_range_0)
+            
+            if disp_path:
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, texture1)
+            
         ## trans * rotate * scale * 3D model
         rotation_mat = y_rotation(rotation_)
         affine_mat = np.eye(4)
         affine_mat[:3,:3] = affine_mat[:3,:3] * np.array([scaleX, scaleY, scaleZ])
-        affine_mat[:3,-1] = np.array([transX, transY, transZ])
+        trans = np.array([transX, transY, transZ])
+        # affine_mat[:3,-1] = trans
         rotation_mat = rotation_mat @ affine_mat.T
         
+        # glUniformMatrix4fv(scale, 1, GL_FALSE, affine_mat)
         glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
+        glUniform3fv(translate, 1, trans)
         
         view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
         glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
@@ -521,7 +601,15 @@ def main(mesh, resolution, image_path, timer=False,
             changed, transZ = imgui.input_float(label="set Trans z",value=transZ, step=0.001)
             
             clicked, zoom   = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
-            changed, Reset_button     = imgui.menu_item("Reset", None, Reset_button)
+            changed, Reset_button = imgui.menu_item("Reset", None, Reset_button)
+            clicked_use_disp, use_disp   = imgui.menu_item("Use_disp", None, use_disp)
+            clicked_use_tex, onoff_tex   = imgui.menu_item("OnOff Tex", None, onoff_tex)
+
+            if clicked_use_disp:
+                use_disp != use_disp
+            if clicked_use_tex:
+                onoff_tex != onoff_tex
+            # print(use_disp)
             
             if Reset_button:
                 if pca_v == True:
@@ -532,11 +620,11 @@ def main(mesh, resolution, image_path, timer=False,
                 scaleZ      = 1.0
                 transX      = 0.0
                 transY      = 0.0
-                transZ      = 0.0
+                transZ      = -1.0
                 rotation_   = 0
                 normalize   = False
                 Reset_button= False
-                
+                                
             rotation_ = rotation_ % 360
             
             if pca_v == True:
