@@ -261,13 +261,14 @@ def render(resolution=512, mesh=None):
     # image_path  = "white.png"
     boundary_mask_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
     
-    num = 12 # long pants
-    num = 315 # long pants
-    num = 38243 # short pants
+    num = None
+    # num = 12 # long pants
+    # num = 315 # long pants
+    # num = 38243 # short pants
     # num = 39417 # short pants
     
     base_path = "M:\\SihunCha\\Publication\\[EG_2023]\\9_fast_forward"
-    if 1:
+    if num:
         image_path= base_path + "\\re_try\\infer\\Refiner-Sampler4-new-2\\final texture\\image_{:06}_output.png".format(num)
         disp_path = base_path + "\\re_try\\displacement\\image_{:06}_refine_smpld.json_crop_displacement_map.png".format(num)
         json_file = base_path + "\\re_try\\displacement\\json\\image_{:06}_refine_smpld.json".format(num)
