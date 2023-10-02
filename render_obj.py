@@ -17,8 +17,92 @@ from easydict import EasyDict
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
 import sys
-from pytorch3d.io import load_obj, save_obj
+from pytorch3d.io import load_obj, save_obj, load_objs_as_meshes
 import json
+import torch
+import pickle as pkl
+from tqdm import tqdm
+
+from pytorch3d.structures import Meshes
+# from pytorch3d.ops import laplacian_matrix
+from scipy.sparse.linalg import cg
+import scipy.sparse
+import numpy as np
+
+# ------------------------ Laplacian Matrices ------------------------ #
+# This file contains implementations of differentiable laplacian matrices.
+# These include
+# 1) Standard Laplacian matrix
+# 2) Cotangent Laplacian matrix
+# 3) Norm Laplacian matrix
+# -------------------------------------------------------------------- #
+
+def adjacency_matrix(verts: torch.Tensor, edges: torch.Tensor):
+    V = verts.shape[0]
+
+    e0, e1 = edges.unbind(1)
+
+    idx01 = torch.stack([e0, e1], dim=1)  # (E, 2)
+    idx10 = torch.stack([e1, e0], dim=1)  # (E, 2)
+    idx = torch.cat([idx01, idx10], dim=0).t()  # (2, 2*E)
+
+    # First, we construct the adjacency matrix,
+    # i.e. A[i, j] = 1 if (i,j) is an edge, or
+    # A[e0, e1] = 1 &  A[e1, e0] = 1
+    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
+    A = torch.sparse.FloatTensor(idx, ones, (V, V))
+    return A
+
+def laplacian_matrix(verts: torch.Tensor, edges: torch.Tensor):
+    """
+    Computes the laplacian matrix.
+    The definition of the laplacian is
+    L[i, j] =    -1       , if i == j
+    L[i, j] = 1 / deg(i)  , if (i, j) is an edge
+    L[i, j] =    0        , otherwise
+    where deg(i) is the degree of the i-th vertex in the graph.
+
+    Args:
+        verts: tensor of shape (V, 3) containing the vertices of the graph
+        edges: tensor of shape (E, 2) containing the vertex indices of each edge
+    Returns:
+        L: Sparse FloatTensor of shape (V, V)
+    """
+    V = verts.shape[0]
+
+    e0, e1 = edges.unbind(1)
+
+    idx01 = torch.stack([e0, e1], dim=1)  # (E, 2)
+    idx10 = torch.stack([e1, e0], dim=1)  # (E, 2)
+    idx = torch.cat([idx01, idx10], dim=0).t()  # (2, 2*E)
+
+    # First, we construct the adjacency matrix,
+    # i.e. A[i, j] = 1 if (i,j) is an edge, or
+    # A[e0, e1] = 1 &  A[e1, e0] = 1
+    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
+    A = torch.sparse.FloatTensor(idx, ones, (V, V))
+
+    # the sum of i-th row of A gives the degree of the i-th vertex
+    deg = torch.sparse.sum(A, dim=1).to_dense()
+
+    # We construct the Laplacian matrix by adding the non diagonal values
+    # i.e. L[i, j] = 1 ./ deg(i) if (i, j) is an edge
+    deg0 = deg[e0]
+    # pyre-fixme[58]: `/` is not supported for operand types `float` and `Tensor`.
+    deg0 = torch.where(deg0 > 0.0, 1.0 / deg0, deg0)
+    deg1 = deg[e1]
+    # pyre-fixme[58]: `/` is not supported for operand types `float` and `Tensor`.
+    deg1 = torch.where(deg1 > 0.0, 1.0 / deg1, deg1)
+    val = torch.cat([deg0, deg1])
+    L = torch.sparse.FloatTensor(idx, val, (V, V))
+
+    # Then we add the diagonal values L[i, i] = -1.
+    idx = torch.arange(V, device=verts.device)
+    idx = torch.stack([idx, idx], dim=0)
+    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
+    L -= torch.sparse.FloatTensor(idx, ones, (V, V))
+
+    return L
 
 def compute_face_norm(vn, f):
     v1 = vn[f:, 0]
@@ -102,7 +186,6 @@ def load_texture(path):
     glGenerateMipmap(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, texture)
     return texture
-
 
 def rotation(M, angle, x, y, z):
     angle = np.pi * angle / 180.0
@@ -227,25 +310,85 @@ def computeTangentBasis(vertex, uv):
     # import pdb;pdb.set_trace()
     return tangents
 
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import factorized
+
+class SolveLaplacian:
+    def __init__(self, mesh):
+        self.mesh = mesh
+        self.A = None
+        self.ATA = None
+        self.solver = None
+        self.ATb = None
+        self.x = [None, None, None]
+        self.b = [None, None, None]
+        self.build_system_matrix()
+
+        m, n = self.A.shape
+        self.ATb = np.zeros(n)
+        for i in range(3):
+            self.x[i] = np.zeros(n)
+            self.b[i] = np.zeros(m)
+            for j, v in enumerate(mesh.vList):
+                self.x[i][j] = v.Position()[i]
+            self.b[i] = self.A @ self.x[i]
+
+        self.build_system_matrix()
+        self.build_matrix_ATA()
+        self.solver = self.factorization()
+        print("ok" if self.solver else "fail")
+
+    def build_system_matrix(self):
+        raise NotImplementedError
+
+    def build_matrix_ATA(self):
+        AT = self.A.transpose()
+        self.ATA = AT @ self.A
+
+    def factorization(self):
+        print("Factorization")
+        ATA_csr = csr_matrix(self.ATA)
+        solver = factorized(ATA_csr)
+        return solver
+
+    def deform(self):
+        vList = self.mesh.Vertices()
+        n = len(vList)
+        for i in range(3):
+            for j, v in enumerate(vList):
+                if v.Flag():
+                    # add constraints with weight = 1000 
+                    self.b[i][j+n] = v.Position()[i] * 1000
+            self.ATb = self.A.T @ self.b[i]
+            self.x[i] = self.solver(self.ATb)
+        for j, v in enumerate(vList):
+            if v.Flag() == 0:
+                v.SetPosition(np.array([self.x[0][j], self.x[1][j], self.x[2][j]]))
+
 def render(resolution=512, mesh=None):
     if mesh is None:
         # mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
         
-        ### high res smpl mesh
-        mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
+        # ### high res smpl mesh
+        # mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
+        # # meshes.num_verts_per_mesh()
+        # meshes = load_objs_as_meshes(["experiment/smpl_hres/smpl_hres_mesh_2.obj"])
         
         ### smpl mesh
         # mesh = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
-        
+                
         ### mignle mesh
-        # mesh = load_obj_mesh("N:/01-Projects/2023_KOCCA_AvatarFashion/10_data/Avatar_00_no_hair.obj")
-        # mesh_ = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
+        path = "N:/01-Projects/2023_KOCCA_AvatarFashion/10_data sample/Avatar_00_no_hair-male.obj"
+        mesh = load_obj_mesh(path)
+        meshes = load_objs_as_meshes([path])
+        mesh_ = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
         
         ### mignle hres mesh
         # mesh = load_obj_mesh("D:/test/RaBit/experiment/mingle/hres_to_Avatar_00.obj")
         # mesh_ = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
-        # mesh.vn = mesh_.vn
-        # mesh.fn = mesh_.fn
+        mesh.vn = mesh_.vn
+        mesh.fn = mesh_.fn
         
         # mesh = load_obj_mesh("mean.obj")
         # tmp_obj = load_obj("experiment/smpl_hres/smpl_hres_mesh_2.obj")
@@ -255,23 +398,29 @@ def render(resolution=512, mesh=None):
         # mesh.ft     = tmp_obj[1].textures_idx
         # mesh.vt     = tmp_obj[2].verts_uvs
         # mesh.vn     = tmp_obj[2].normals
-    
+            
     mesh.v      = normalize_v(mesh.v)
     
     # image_path  = "white.png"
     boundary_mask_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
     
     num = None
-    # num = 12 # long pants
+    num = 12 # long pants
     # num = 315 # long pants
     # num = 38243 # short pants
     # num = 39417 # short pants
     
     base_path = "M:\\SihunCha\\Publication\\[EG_2023]\\9_fast_forward"
     if num:
-        image_path= base_path + "\\re_try\\infer\\Refiner-Sampler4-new-2\\final texture\\image_{:06}_output.png".format(num)
-        disp_path = base_path + "\\re_try\\displacement\\image_{:06}_refine_smpld.json_crop_displacement_map.png".format(num)
-        json_file = base_path + "\\re_try\\displacement\\json\\image_{:06}_refine_smpld.json".format(num)
+        # image_path= base_path + "\\re_try\\infer\\Refiner-Sampler4-new-2\\final texture\\image_{:06}_output.png".format(num)
+        # disp_path = base_path + "\\re_try\\displacement\\image_{:06}_refine_smpld.json_crop_displacement_map.png".format(num)
+        # json_file = base_path + "\\re_try\\displacement\\json\\image_{:06}_refine_smpld.json".format(num)
+        image_path= "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003.png"
+        # disp_path = "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003_smpld_disp.json_crop_displacement_map.png"
+        # json_file = "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003_smpld_disp.json"
+        disp_path = "D:/test/Mingle/experiment/rp_aaron/rp_aaron_posed_003_smpld_disp.json_crop_displacement_map.png"
+        json_file = "D:/test/Mingle/experiment/rp_aaron/rp_aaron_posed_003_smpld_disp.json"
+        
         with open(json_file) as f:
             json_object = json.load(f)
     else:
@@ -289,7 +438,8 @@ def render(resolution=512, mesh=None):
     if not exists(savefolder):
         os.makedirs(savefolder)
     # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(num))
-    savefile    = join(savefolder, 'rendered_test_{:06}.png'.format(num))
+    # savefile    = join(savefolder, 'rendered_test_{:06}.png'.format(num))
+    savefile    = join(savefolder, 'exp_{:06}.png'.format(num))
     # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(0))
 
     Image.fromarray(rendered).save(savefile)
@@ -396,6 +546,7 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     
     # import pdb;pdb.set_trace()
     if f.max() == vn.shape[0]:
+    # if True:
         new_vn = vn[mesh.fn].reshape(-1, 3)
     else:
         new_vn = vn[f].reshape(-1, 3)
@@ -477,8 +628,9 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     if json_object:
         d_range = json_object['d_range']
         d_range_0 = np.zeros_like(d_range)
-        gl_d_range   = glGetUniformLocation(shader, "d_range")
-        use_disp = True
+        gl_d_range = glGetUniformLocation(shader, "d_range")
+        use_disp = False
+        # use_disp = True
     
     onoff_tex = True
     
@@ -524,7 +676,7 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
         
         if json_object:
             if use_disp:
-                glUniform3fv(gl_d_range, 1, d_range)
+                glUniform3fv(gl_d_range, 1, d_range*100)
             else:
                 glUniform3fv(gl_d_range, 1, d_range_0)
             
@@ -583,6 +735,8 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
 
                     imgui.end_menu()
                 imgui.end_main_menu_bar()
+            
+            imgui.text("d_range: {}".format(d_range))
             
             clicked, tex_alpha = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
             clicked, _ratio    = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
