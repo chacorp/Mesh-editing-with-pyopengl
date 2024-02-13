@@ -2,178 +2,35 @@ from __future__ import print_function
 
 import os
 from os.path import exists, join, split
-from glob import glob
+
+import sys
+import json
+import torch
 import numpy as np
+import pickle as pkl
+from glob import glob
+from tqdm import tqdm
+from PIL import Image
+from easydict import EasyDict
+
+# from scipy.sparse.linalg import cg
+# import scipy.sparse
 
 import glfw
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
-import numpy as np
-from PIL import Image
 import glm
-from easydict import EasyDict
 
 # from testwindow import *
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
-import sys
-from pytorch3d.io import load_obj, save_obj, load_objs_as_meshes
-import json
-import torch
-import pickle as pkl
-from tqdm import tqdm
 
-from pytorch3d.structures import Meshes
+#from pytorch3d.structures import Meshes
+#from pytorch3d.io import load_obj, save_obj, load_objs_as_meshes
 # from pytorch3d.ops import laplacian_matrix
-from scipy.sparse.linalg import cg
-import scipy.sparse
-import numpy as np
 
-# ------------------------ Laplacian Matrices ------------------------ #
-# This file contains implementations of differentiable laplacian matrices.
-# These include
-# 1) Standard Laplacian matrix
-# 2) Cotangent Laplacian matrix
-# 3) Norm Laplacian matrix
-# -------------------------------------------------------------------- #
+from utils.util import *
 
-def adjacency_matrix(verts: torch.Tensor, edges: torch.Tensor):
-    V = verts.shape[0]
-
-    e0, e1 = edges.unbind(1)
-
-    idx01 = torch.stack([e0, e1], dim=1)  # (E, 2)
-    idx10 = torch.stack([e1, e0], dim=1)  # (E, 2)
-    idx = torch.cat([idx01, idx10], dim=0).t()  # (2, 2*E)
-
-    # First, we construct the adjacency matrix,
-    # i.e. A[i, j] = 1 if (i,j) is an edge, or
-    # A[e0, e1] = 1 &  A[e1, e0] = 1
-    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
-    A = torch.sparse.FloatTensor(idx, ones, (V, V))
-    return A
-
-def laplacian_matrix(verts: torch.Tensor, edges: torch.Tensor):
-    """
-    Computes the laplacian matrix.
-    The definition of the laplacian is
-    L[i, j] =    -1       , if i == j
-    L[i, j] = 1 / deg(i)  , if (i, j) is an edge
-    L[i, j] =    0        , otherwise
-    where deg(i) is the degree of the i-th vertex in the graph.
-
-    Args:
-        verts: tensor of shape (V, 3) containing the vertices of the graph
-        edges: tensor of shape (E, 2) containing the vertex indices of each edge
-    Returns:
-        L: Sparse FloatTensor of shape (V, V)
-    """
-    V = verts.shape[0]
-
-    e0, e1 = edges.unbind(1)
-
-    idx01 = torch.stack([e0, e1], dim=1)  # (E, 2)
-    idx10 = torch.stack([e1, e0], dim=1)  # (E, 2)
-    idx = torch.cat([idx01, idx10], dim=0).t()  # (2, 2*E)
-
-    # First, we construct the adjacency matrix,
-    # i.e. A[i, j] = 1 if (i,j) is an edge, or
-    # A[e0, e1] = 1 &  A[e1, e0] = 1
-    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
-    A = torch.sparse.FloatTensor(idx, ones, (V, V))
-
-    # the sum of i-th row of A gives the degree of the i-th vertex
-    deg = torch.sparse.sum(A, dim=1).to_dense()
-
-    # We construct the Laplacian matrix by adding the non diagonal values
-    # i.e. L[i, j] = 1 ./ deg(i) if (i, j) is an edge
-    deg0 = deg[e0]
-    # pyre-fixme[58]: `/` is not supported for operand types `float` and `Tensor`.
-    deg0 = torch.where(deg0 > 0.0, 1.0 / deg0, deg0)
-    deg1 = deg[e1]
-    # pyre-fixme[58]: `/` is not supported for operand types `float` and `Tensor`.
-    deg1 = torch.where(deg1 > 0.0, 1.0 / deg1, deg1)
-    val = torch.cat([deg0, deg1])
-    L = torch.sparse.FloatTensor(idx, val, (V, V))
-
-    # Then we add the diagonal values L[i, i] = -1.
-    idx = torch.arange(V, device=verts.device)
-    idx = torch.stack([idx, idx], dim=0)
-    ones = torch.ones(idx.shape[1], dtype=torch.float32, device=verts.device)
-    L -= torch.sparse.FloatTensor(idx, ones, (V, V))
-
-    return L
-
-def compute_face_norm(vn, f):
-    v1 = vn[f:, 0]
-    v2 = vn[f:, 1]
-    v3 = vn[f:, 2]
-    e1 = v1 - v2
-    e2 = v2 - v3
-
-    return np.cross(e1, e2)
-
-def LoadTexture(filename):
-    pBitmap = Image.open(filename)
-    pBitmap = pBitmap.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-    glformat = GL_RGB # if pBitmap.mode == "RGB" else GL_RGBA
-    pBitmap = pBitmap.convert('RGB') # 'RGBA
-    pBitmapData = np.array(pBitmap, np.uint8)
-    
-    # pBitmapData = np.array(list(pBitmap.getdata()), np.int8)
-    texName = glGenTextures(1)
-    # import pdb; pdb.set_trace()    
-    glBindTexture(GL_TEXTURE_2D, texName)
-    glTexImage2D(
-        GL_TEXTURE_2D, 0, GL_RGB, pBitmap.size[0], pBitmap.size[1], 0, GL_RGB, GL_UNSIGNED_BYTE, pBitmapData
-    )
-
-    # glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    # glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-    
-    ### Texture Wrapping
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
-    
-    ### Texture Filtering
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    """        
-        GL_NEAREST_MIPMAP_NEAREST: nearest mipmap to match the pixel size and uses nearest neighbor interpolation for texture sampling.
-        GL_LINEAR_MIPMAP_NEAREST:  nearest mipmap level and samples that level using linear interpolation.
-        GL_NEAREST_MIPMAP_LINEAR:  linearly interpolates between the two closest mipmaps & samples via nearest neighbor interpolation.
-        GL_LINEAR_MIPMAP_LINEAR:   linearly interpolates between the two closest mipmaps & samples via linear interpolation.
-    """
-    
-    # glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL)
-    glGenerateMipmap(GL_TEXTURE_2D)
-    return texName
-
-def load_textures(filenames):
-    texture = glGenTextures(len(filenames))
-    for i, filename in enumerate(filenames):
-        pBitmap = Image.open(filename)
-        pBitmap = pBitmap.transpose(Image.Transpose.FLIP_TOP_BOTTOM) 
-        # glformat = GL_RGB # if pBitmap.mode == "RGB" else GL_RGBA
-        pBitmap = pBitmap.convert('RGB') # 'RGBA
-        pBitmapData = np.array(pBitmap, np.uint8)
-            
-    
-        glBindTexture(GL_TEXTURE_2D, texture[i])
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
-    
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexImage2D(
-            GL_TEXTURE_2D, 0, GL_RGB, pBitmap.size[0], pBitmap.size[1], 0, GL_RGB, GL_UNSIGNED_BYTE, pBitmapData
-        )
-    return texture
 
 def load_texture(path):
     texture = glGenTextures(1)
@@ -187,50 +44,7 @@ def load_texture(path):
     glBindTexture(GL_TEXTURE_2D, texture)
     return texture
 
-def rotation(M, angle, x, y, z):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    n = np.sqrt(x*x + y*y + z*z)
-    x,y,z = x/n, y/n, z/n
-    cx,cy,cz = (1-c)*x, (1-c)*y, (1-c)*z
-    R = np.array([[cx*x + c,   cy*x - z*s, cz*x + y*s, 0.0],
-                  [cx*y + z*s, cy*y + c,   cz*y - x*s, 0.0],
-                  [cx*z - y*s, cy*z + x*s, cz*z + c,   0.0],
-                  [0.0,        0.0,        0.0,        1.0]], dtype=M.dtype)
-
-    return np.dot(M, R.T)
-
-def y_rotation(angle):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[   c,       0.0,          s,        0.0],
-                  [ 0.0,       1.0,        0.0,        0.0],
-                  [  -s,       0.0,          c,        0.0],
-                  [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
-    return R
-
-def z_rotation(angle):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[   c,        -s,        0.0,        0.0],
-                  [   s,         c,        0.0,        0.0],
-                  [ 0.0,       0.0,        1.0,        0.0],
-                  [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
-    return R
-
-def normalize_v(V):
-    V = np.array(V)
-    V = (V-(V.max(0)+V.min(0))*0.5)/max(V.max(0)-V.min(0))
-    # V = (V-(V.max(0).values + V.min(0).values) * 0.5)/max(V.max(0).values - V.min(0).values)
-    
-    # FLAME
-    # V = V - V.mean(0).values
-    # V = V - V.min(0).values[1]
-    # V = V / V.max(0).values[1]
-    # V = (V * 2.0) - 1.0
-    return V
-
-def load_obj_mesh(mesh_path):
+def load_obj_mesh(mesh_path, norm=True):
     mesh = EasyDict()
     vertex_data = []
     vertex_normal = []
@@ -263,8 +77,10 @@ def load_obj_mesh(mesh_path):
             if len(values[1].split('/')) >=3:
                 ft = list(map(lambda x: int(x.split('/')[2]),  values[1:]))
                 face_normal.append(ft)
-    # mesh.v  = np.array(vertex_data)
-    mesh.v  = normalize_v(np.array(vertex_data))
+    if norm:
+        mesh.v  = normalize_v(np.array(vertex_data))
+    else:
+        mesh.v  = np.array(vertex_data)
     mesh.vn = np.array(vertex_normal)
     mesh.vt = np.array(vertex_texture)
     mesh.f  = np.array(face_data) -1
@@ -272,245 +88,25 @@ def load_obj_mesh(mesh_path):
     mesh.fn = np.array(face_normal) -1
     return mesh
 
-def vertex_normal(v1, v2, v3):
-    v1c = np.cross(v2 - v1, v3 - v1)
-    v1n = v1c/np.linalg.norm(v1c)
-    return v1n
-
-def computeTangentBasis(vertex, uv):
-    tangents = []
-    tangents = np.zeros_like(vertex)
-    # bitangents = []
-    for idx in range(0, len(vertex)//3):
-        
-        # import pdb;pdb.set_trace()
-        offset = idx*3
-        v0 = vertex[offset]
-        v1 = vertex[offset+1]
-        v2 = vertex[offset+2]
-
-        offset = idx*3
-        uv0 =    uv[offset]
-        uv1 =    uv[offset+1]
-        uv2 =    uv[offset+2]
-        #print v0,v1,v2
-        deltaPos1 = np.array([v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2]])
-        deltaPos2 = np.array([v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2]])
-
-        deltaUV1 = np.array([uv1[0]-uv0[0], uv1[1]-uv0[1]])
-        deltaUV2 = np.array([uv2[0]-uv0[0], uv2[1]-uv0[1]])
-
-        f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV1[1] * deltaUV2[0])
-        tangent = (deltaPos1 * deltaUV2[1]   - deltaPos2 * deltaUV1[1]) * f
-        # bitangent = (deltaPos2 * deltaUV1[0]   - deltaPos1 * deltaUV2[0]) * f
-
-        tangents[offset]   = tangent
-        tangents[offset+1] = tangent
-        tangents[offset+2] = tangent
-    # import pdb;pdb.set_trace()
-    return tangents
-
-import numpy as np
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import factorized
-
-class SolveLaplacian:
-    def __init__(self, mesh):
-        self.mesh = mesh
-        self.A = None
-        self.ATA = None
-        self.solver = None
-        self.ATb = None
-        self.x = [None, None, None]
-        self.b = [None, None, None]
-        self.build_system_matrix()
-
-        m, n = self.A.shape
-        self.ATb = np.zeros(n)
-        for i in range(3):
-            self.x[i] = np.zeros(n)
-            self.b[i] = np.zeros(m)
-            for j, v in enumerate(mesh.vList):
-                self.x[i][j] = v.Position()[i]
-            self.b[i] = self.A @ self.x[i]
-
-        self.build_system_matrix()
-        self.build_matrix_ATA()
-        self.solver = self.factorization()
-        print("ok" if self.solver else "fail")
-
-    def build_system_matrix(self):
-        raise NotImplementedError
-
-    def build_matrix_ATA(self):
-        AT = self.A.transpose()
-        self.ATA = AT @ self.A
-
-    def factorization(self):
-        print("Factorization")
-        ATA_csr = csr_matrix(self.ATA)
-        solver = factorized(ATA_csr)
-        return solver
-
-    def deform(self):
-        vList = self.mesh.Vertices()
-        n = len(vList)
-        for i in range(3):
-            for j, v in enumerate(vList):
-                if v.Flag():
-                    # add constraints with weight = 1000 
-                    self.b[i][j+n] = v.Position()[i] * 1000
-            self.ATb = self.A.T @ self.b[i]
-            self.x[i] = self.solver(self.ATb)
-        for j, v in enumerate(vList):
-            if v.Flag() == 0:
-                v.SetPosition(np.array([self.x[0][j], self.x[1][j], self.x[2][j]]))
-
-def render(resolution=512, mesh=None):
-    if mesh is None:
-        # mesh = load_obj_mesh("R:\eNgine_visual_wave\engine_obj\M_012.obj")
-        
-        # ### high res smpl mesh
-        # mesh = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
-        # # meshes.num_verts_per_mesh()
-        # meshes = load_objs_as_meshes(["experiment/smpl_hres/smpl_hres_mesh_2.obj"])
-        
-        ### smpl mesh
-        # mesh = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
-                
-        ### mignle mesh
-        path = "N:/01-Projects/2023_KOCCA_AvatarFashion/10_data sample/Avatar_00_no_hair-male.obj"
-        mesh = load_obj_mesh(path)
-        meshes = load_objs_as_meshes([path])
-        mesh_ = load_obj_mesh("D:/Dataset/smpl_mesh_1.obj")
-        
-        ### mignle hres mesh
-        # mesh = load_obj_mesh("D:/test/RaBit/experiment/mingle/hres_to_Avatar_00.obj")
-        # mesh_ = load_obj_mesh("experiment/smpl_hres/smpl_hres_mesh_2.obj")
-        mesh.vn = mesh_.vn
-        mesh.fn = mesh_.fn
-        
-        # mesh = load_obj_mesh("mean.obj")
-        # tmp_obj = load_obj("experiment/smpl_hres/smpl_hres_mesh_2.obj")
-        # mesh        = EasyDict()
-        # mesh.v      = tmp_obj[0]
-        # mesh.f      = tmp_obj[1].verts_idx
-        # mesh.ft     = tmp_obj[1].textures_idx
-        # mesh.vt     = tmp_obj[2].verts_uvs
-        # mesh.vn     = tmp_obj[2].normals
-            
-    mesh.v      = normalize_v(mesh.v)
+def main(mesh_file, image_path, resolution=1024, json_object=None, timer=False):
     
-    # image_path  = "white.png"
-    boundary_mask_path  = "experiment/smpl_hres/SMPL_boundary_mask.png"
+    if len(mesh_file) == 0:
+        mesh_file = r"data\scan.obj"
+
+    mesh = load_obj_mesh(mesh_file)
     
     num = None
-    num = 12 # long pants
-    # num = 315 # long pants
-    # num = 38243 # short pants
-    # num = 39417 # short pants
+    image_path= r"data\scan_tex.jpg"
+    image_white= r"data\white.png"
     
-    base_path = "M:\\SihunCha\\Publication\\[EG_2023]\\9_fast_forward"
     if num:
-        # image_path= base_path + "\\re_try\\infer\\Refiner-Sampler4-new-2\\final texture\\image_{:06}_output.png".format(num)
-        # disp_path = base_path + "\\re_try\\displacement\\image_{:06}_refine_smpld.json_crop_displacement_map.png".format(num)
-        # json_file = base_path + "\\re_try\\displacement\\json\\image_{:06}_refine_smpld.json".format(num)
-        image_path= "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003.png"
-        # disp_path = "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003_smpld_disp.json_crop_displacement_map.png"
-        # json_file = "D:/test/Mingle/experiment/rp_aaron_posed_003/rp_aaron_posed_003_smpld_disp.json"
-        disp_path = "D:/test/Mingle/experiment/rp_aaron/rp_aaron_posed_003_smpld_disp.json_crop_displacement_map.png"
         json_file = "D:/test/Mingle/experiment/rp_aaron/rp_aaron_posed_003_smpld_disp.json"
-        
         with open(json_file) as f:
             json_object = json.load(f)
     else:
-        disp_path = None
         json_object = None
-    
-        
-    # rendered    = main(mesh, resolution, image_path, timer=True)
-    rendered    = main(mesh, resolution, image_path, disp_path, json_object, boundary_mask_path, timer=True)
-    # rendered    = main(mesh, resolution, image_path, disp_path=None, json_object=None, timer=True)
-    rendered    = rendered[::-1, :, :]
-    
-    # make directory
-    savefolder  = join('output_mingle')
-    if not exists(savefolder):
-        os.makedirs(savefolder)
-    # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(num))
-    # savefile    = join(savefolder, 'rendered_test_{:06}.png'.format(num))
-    savefile    = join(savefolder, 'exp_{:06}.png'.format(num))
-    # savefile    = join(savefolder, 'rendered_{:06}_tex.png'.format(0))
 
-    Image.fromarray(rendered).save(savefile)
-    return
 
-def data_render(resolution=512):
-    meshlist = sorted(glob("R:\\3DBiCar\\data\\*\\tpose\\m.obj"))
-    
-    from pytorch3d.io import load_obj    
-    # objs = "./data/*/tpose/m.obj"
-    # obj_list = sorted(glob(objs))    
-    # tmp_obj = load_obj(obj_list[0])
-    # verts = tmp_obj[0]
-    # faces = tmp_obj[1].verts_idx
-    # ft    = tmp_obj[1].textures_idx
-    # uvs   = tmp_obj[2].verts_uvs
-    # vn    = tmp_obj[2].normals
-    
-    for meshdir in meshlist:
-        idx = meshdir.split('\\')[-3]
-        # mesh = load_obj_mesh(meshdir)
-        tmp_obj = load_obj(meshdir)
-        mesh = EasyDict()
-        mesh.v  = tmp_obj[0]
-        mesh.f  = tmp_obj[1].verts_idx
-        mesh.ft = tmp_obj[1].textures_idx
-        mesh.vt = tmp_obj[2].verts_uvs
-        mesh.vn = tmp_obj[2].normals
-        mesh.v = normalize_v(mesh.v)
-        mesh.v[:,2] = mesh.v[:,2] * -1
-                
-        # image_path  = "white.png"
-        image_path  = "experiment/tex.png"
-        rendered    = main(mesh, resolution, image_path, timer=True)
-        rendered    = rendered[::-1, :, :]
-        
-        # make directory
-        savefolder  = join('output')
-        if not exists(savefolder):
-            os.makedirs(savefolder)
-        print(idx)
-        savefile    = join(savefolder, 'rendered_{}.png'.format(idx))
-
-        Image.fromarray(rendered).save(savefile)
-        # return
-
-def pca_render(mean, coef, basis, uvs, vn, faces, ft, resolution=512):    
-    pca_mesh    = EasyDict()
-    pca_mesh.v  = None # dummy -> calculated in main()
-    pca_mesh.vt = uvs
-    pca_mesh.vn = vn
-    pca_mesh.f  = faces
-    pca_mesh.ft = ft
-    
-    # image_path  = "white.png"
-    image_path  = "experiment/test/tex.png"
-    rendered    = main(pca_mesh, resolution, image_path, timer=True, 
-                       pca_v=True, mean=mean, coef=coef, basis=basis)
-    rendered    = rendered[::-1, :, :]
-    
-    # make directory
-    savefolder  = join('experiment/output')
-    if not exists(savefolder):
-        os.makedirs(savefolder)
-    savefile    = join(savefolder, 'rendered.png')
-
-    Image.fromarray(rendered).save(savefile)
-    return
-
-def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundary_mask_path=None, timer=False, 
-         pca_v=False, mean=None, coef=None, basis=None):
     if timer == True:
         import time
         start = time.time()
@@ -535,21 +131,19 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
 
     glfw.make_context_current(window)
 
+    new_v  = v[f].reshape(-1, 3)
     new_vt = vt[ft].reshape(-1,2)
     new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
     
-    if pca_v == True:
-        blendshape = np.zeros_like(coef)
-        new_v = np.zeros_like(new_vt) # dummy -> will be updated in while loop
-    else:
-        new_v  = v[f].reshape(-1, 3)
     
-    # import pdb;pdb.set_trace()
     if f.max() == vn.shape[0]:
-    # if True:
         new_vn = vn[mesh.fn].reshape(-1, 3)
     else:
-        new_vn = vn[f].reshape(-1, 3)
+        fn = compute_face_norm(mesh.v, mesh.f)
+        vn = compute_vert_norm(torch.from_numpy(mesh.f).type(torch.int64), torch.from_numpy(fn)[None]).squeeze(0)
+        vn = np.array(vn)
+        new_vn = vn[mesh.f].reshape(-1, 3)
+    # import pdb;pdb.set_trace()
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
     quad = np.array(quad, dtype=np.float32)
 
@@ -570,15 +164,15 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     # EBO = glGenBuffers(1)
     # glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO)
     # glBufferData(GL_ELEMENT_ARRAY_BUFFER, 4*indices.shape[0]*indices.shape[1], indices, GL_STATIC_DRAW)
-    
-    VBO = glGenBuffers(1)
-    glBindBuffer(GL_ARRAY_BUFFER, VBO)
-    glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
     """
         GL_STREAM_DRAW:  the data is set only once and used by the GPU at most a few times.
         GL_STATIC_DRAW:  the data is set only once and used many times.
         GL_DYNAMIC_DRAW: the data is changed a lot and used many times.
     """
+    
+    VBO = glGenBuffers(1)
+    glBindBuffer(GL_ARRAY_BUFFER, VBO)
+    glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
     
     # 4*3*3 : size of float * len(X,Y,Z) * len(pos, tex, nor)
     vertex_stride = 4 * quad.shape[1]
@@ -600,12 +194,16 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     glUseProgram(shader)
                 
     texture0 = load_texture(image_path)
-    glUniform1i(glGetUniformLocation(shader, "texture0"), 0)
-    if disp_path:
-        texture1 = load_texture(disp_path)
-        glUniform1i(glGetUniformLocation(shader, "texture1"), 1)
-    if boundary_mask_path:
-        textureB = load_texture(boundary_mask_path)
+    textureB = load_texture(image_white)
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture0)
+    
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, textureB)
+    
+    glUniform1i(glGetUniformLocation(shader, "texture0"), 0)    
+    glUniform1i(glGetUniformLocation(shader, "textureB"), 1)
     ############################################## uniform ###############
     i = 0
     rotation_ = 0
@@ -622,8 +220,27 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     
     tex_alpha = 1.0
     
+    show_m = True
+    
+    region_x = -100
+    region_y = -100
+    
+    select_ldm = False
     normalize = False
     _ratio = 1.0
+    
+    ldm_shift  = 0
+    show_ldm   = False
+    m_ldm1_idx = 0
+    m_ldm2_idx = 0
+    m_ldm3_idx = 0
+    m_ldm4_idx = 0
+    m_ldm1     = np.array([-10.0, -10.0, -10.0])
+    m_ldm2     = np.array([-10.0, -10.0, -10.0])
+    m_ldm3     = np.array([-10.0, -10.0, -10.0])
+    m_ldm4     = np.array([-10.0, -10.0, -10.0])
+    
+    onoff_tex = True
     
     if json_object:
         d_range = json_object['d_range']
@@ -632,14 +249,17 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
         use_disp = False
         # use_disp = True
     
-    onoff_tex = True
     
-    scale   = glGetUniformLocation(shader, "scale") # scale rotate translate
+    scale     = glGetUniformLocation(shader, "scale") # scale rotate translate
     transform = glGetUniformLocation(shader, "transform")
     translate = glGetUniformLocation(shader, "trans")
+    
+    glmouse2fv= glGetUniformLocation(shader, "mouse")
         
     glView    = glGetUniformLocation(shader, "proj")
     gl_alpha  = glGetUniformLocation(shader, "_alpha")
+    
+    glshow_m  = glGetUniformLocation(shader, "show_m")
     
     # view = glm.ortho(-1.0, 2.0, -1.0, 1.0, 0.0001, 1000.0) 
     zoom = 1.0
@@ -666,7 +286,10 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
     ############################################## imgui init ############    
         
     while not glfw.window_should_close(window):
+        mouse = np.array([region_x, region_y])
+        glUniform2fv(glmouse2fv, 1, mouse)
         
+        glUniform1f(glshow_m,   show_m)
         if onoff_tex:
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, texture0)
@@ -679,12 +302,15 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
                 glUniform3fv(gl_d_range, 1, d_range*100)
             else:
                 glUniform3fv(gl_d_range, 1, d_range_0)
+                        
+        # ---------------------------------- Update 3D mesh ----------------------------------
+        """
+        TODO:
+         - []: change transform location (from shader code to here!)
+         - []: select_ldm using mouse position
+        """
             
-            if disp_path:
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, texture1)
-            
-        ## trans * rotate * scale * 3D model
+        ## trans * rotate * scale * 3D model 
         rotation_mat = y_rotation(rotation_)
         affine_mat = np.eye(4)
         affine_mat[:3,:3] = affine_mat[:3,:3] * np.array([scaleX, scaleY, scaleZ])
@@ -699,30 +325,67 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
         view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
         glUniformMatrix4fv(glView, 1, GL_FALSE, glm.value_ptr(view))
         
-        if pca_v == True:
-            upd_v = mean + np.dot(coef * blendshape, basis)
-            upd_v = upd_v.reshape(-1,3)
-            # upd_v = normalize_v(upd_v)
-            # upd_v[:, 2] = upd_v[:, 2] * -1
-            upd_v = upd_v[f].reshape(-1, 3)
-            quad[:, :3] = upd_v
-        else:
-            upd_v = new_v
-            # upd_v = new_v * np.array([scaleX, scaleY, scaleZ])
-            # upd_v = upd_v + np.array([transX, transY, transZ])
-            quad[:, :3] = upd_v
+        upd_v = new_v
+        upd_v = np.hstack((upd_v, np.ones((upd_v.shape[0], 1))))
+        if m_ldm1.mean() != -10.0 or m_ldm2.mean() != -10.0:
+            if normalize:
+                min_x  = min(upd_v[m_ldm1_idx][0], upd_v[m_ldm2_idx][0])
+                max_x  = max(upd_v[m_ldm1_idx][0], upd_v[m_ldm2_idx][0])
+                mean_y = (upd_v[m_ldm1_idx][1] + upd_v[m_ldm2_idx][1]) * 0.5
+                
+                # normalize based on x
+                upd_v[:, 0] = upd_v[:, 0] - min_x
+                upd_v[:, 0] = upd_v[:, 0] / (max_x - min_x) * 2 - 1
+                upd_v[:, 1] = upd_v[:, 1] - mean_y
+                        
+        ## apply transform
+        upd_v = np.dot(upd_v, rotation_mat.T)[:,:3] + trans
+        quad[:, :3] = upd_v
         
         glBindBuffer(GL_ARRAY_BUFFER, VBO)
         glBufferData(GL_ARRAY_BUFFER, 4*quad.shape[0]*quad.shape[1], quad, GL_DYNAMIC_DRAW)
         
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glDrawArrays(GL_TRIANGLES, 0, quad.shape[0])
+        # ------------------------------------------------------------------------------------
 
         glfw.poll_events()
-        if use_imgui or pca_v:
+        if use_imgui:
             impl.process_inputs()
             imgui.new_frame()
             imgui.text("mean vert: {}".format(upd_v.mean(0)))
+            
+            region_x = (imgui.get_mouse_position().x / resolution) * 2 - 1
+            region_y = (imgui.get_mouse_position().y / resolution) * -2 + 1
+            
+            if imgui.is_mouse_double_clicked(0) and select_ldm:
+                region_xy = np.array([region_x, region_y])
+                condition = np.linalg.norm(upd_v[:, :2] - region_xy, axis=1)
+                show_ldm = True
+                if ldm_shift == 0:
+                    m_ldm1_idx = condition.argmin()                
+                    ldm_shift = ldm_shift +1
+                elif ldm_shift == 1:
+                    m_ldm2_idx = condition.argmin()                
+                    ldm_shift = 0
+            if show_ldm:
+                m_ldm1 = upd_v[m_ldm1_idx]
+                m_ldm2 = upd_v[m_ldm2_idx]
+                m_ldm3 = upd_v[m_ldm3_idx]
+                m_ldm4 = upd_v[m_ldm4_idx]
+                    
+            imgui.text("ldm_1: {} {}".format(m_ldm1_idx, m_ldm1))
+            imgui.text("ldm_2: {} {}".format(m_ldm2_idx, m_ldm2))
+                
+            clicked_ldm_, select_ldm= imgui.menu_item("Select landmark", None, select_ldm)
+            clicked_ldm_, show_ldm  = imgui.menu_item("Show landmark", None, show_ldm)
+            clicked_bg, show_m      = imgui.menu_item("Show Model", None, show_m)
+            if show_m:
+                show_m = 1
+            else:
+                show_m = 0
+                
+                
             if imgui.begin_main_menu_bar():
                 if imgui.begin_menu("File", True):
 
@@ -736,7 +399,7 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
                     imgui.end_menu()
                 imgui.end_main_menu_bar()
             
-            imgui.text("d_range: {}".format(d_range))
+            #imgui.text("d_range: {}".format(d_range))
             
             clicked, tex_alpha = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
             clicked, _ratio    = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
@@ -756,19 +419,19 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
             changed, transZ = imgui.input_float(label="set Trans z",value=transZ, step=0.001)
             
             clicked, zoom   = imgui.slider_float(label="Zoom", value=zoom, min_value=0.1,  max_value= 2.0,)
+            clicked_norm, normalize   = imgui.menu_item("Normalize", None, normalize)
+            
             changed, Reset_button = imgui.menu_item("Reset", None, Reset_button)
-            clicked_use_disp, use_disp   = imgui.menu_item("Use_disp", None, use_disp)
+
             clicked_use_tex, onoff_tex   = imgui.menu_item("OnOff Tex", None, onoff_tex)
 
-            if clicked_use_disp:
-                use_disp != use_disp
+            # if clicked_use_disp:
+            #     use_disp != use_disp
             if clicked_use_tex:
                 onoff_tex != onoff_tex
             # print(use_disp)
             
             if Reset_button:
-                if pca_v == True:
-                    blendshape  = blendshape * 0
                 zoom        = 1.0
                 scaleX      = 1.0
                 scaleY      = 1.0
@@ -778,19 +441,11 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
                 transZ      = -1.0
                 rotation_   = 0
                 normalize   = False
+                show_ldm    = False
+                select_ldm  = False
                 Reset_button= False
                                 
             rotation_ = rotation_ % 360
-            
-            if pca_v == True:
-                for i in range(len(blendshape)):    
-                    clicked, blendshape[i] = imgui.slider_float(
-                        label="Value"+ str(i),
-                        value=blendshape[i],
-                        min_value = -1.0,
-                        max_value =  1.0,
-                    )
-            
             imgui.render()
             impl.render(imgui.get_draw_data())
         glfw.swap_buffers(window)
@@ -809,13 +464,25 @@ def main(mesh, resolution, image_path, disp_path=None, json_object=None, boundar
         
         # break
     ################################################## imgui end ############
-    if use_imgui or pca_v:
+    if use_imgui:
         impl.shutdown()
     ################################################## imgui end ############
     glfw.terminate()
-    return a
+    #return a
+    
+    rendered    = a[::-1, :, :]
+    
+    # make directory
+    savefolder  = join('output')
+    if not exists(savefolder):
+        os.makedirs(savefolder)
+    savefile    = join(savefolder, 'exp_{:06}.png'.format(0))
+
+    Image.fromarray(rendered).save(savefile)
+    
 
 if __name__ == '__main__':
-    render(resolution=1024)
+    #render(resolution=1024)
+    main(mesh_file = r"data\scan.obj", image_path= r"data\scan_tex.jpg")
     # data_render(resolution=512)
 
