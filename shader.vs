@@ -21,9 +21,6 @@ out vec3 OutCoord;
 
 void main()
 {
-    // vec3 bitangent = cross(normal, tangent);
-    // mat3 TBN = mat3(tangent, bitangent, normal);
-
     vec4 tempPosition = vec4(position.x, position.y, position.z, 1.0f);
     
     vec4 disp  = texture(texture1, texcoord.xy);
@@ -33,7 +30,7 @@ void main()
 
     tempPosition = tempPosition - vec4(disp.xyz, 0.0f);
 
-    tempPosition = transform * tempPosition + vec4(trans, 0.0f);
+    //tempPosition = transform * tempPosition + vec4(trans, 0.0f);
     tempPosition = proj * tempPosition;
 
     worldPosition = tempPosition; // world space
