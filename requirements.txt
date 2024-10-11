@@ -1,5 +1,5 @@
-opencv-python==4.5.3.56
-opencv-python-headless==4.5.3.56
+opencv-python==4.8.1.78
+opencv-python-headless==4.8.1.78
 PyOpenGL
 PyOpenGL_accelerate
 glfw
