@@ -374,7 +374,7 @@ def main(resolution=512):
     meshes              = load_objs_as_meshes([path])
     mesh.v              = normalize_torch(meshes.verts_packed())
     mesh.e              = meshes.edges_packed()
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     mesh.L, mesh.Adj    = laplacian_and_adjacency(mesh.v.shape[0], mesh.e)
     mesh.Delta          = mesh.L.mm(mesh.v)
     mesh.ring_indices   = [mesh.Adj[i].coalesce().indices()[0].tolist() for i in range(mesh.v.shape[0])]

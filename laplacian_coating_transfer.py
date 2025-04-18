@@ -387,7 +387,7 @@ def main(resolution=512):
     
     mesh.vn             = compute_normals(mesh.v, mesh.f)
         
-    image_path  = "white.png"
+    image_path  = "data/white.png"
 
     rendered    = render(mesh, resolution, image_path)
     rendered    = rendered[::-1, :, :]
@@ -523,7 +523,7 @@ def render(mesh,
     
     transX = 0.0
     transY = 0.0
-    transZ = -1.0
+    transZ = 0.0
     
     Reset_button = False
     

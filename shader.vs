@@ -23,14 +23,14 @@ void main()
 {
     vec4 tempPosition = vec4(position.x, position.y, position.z, 1.0f);
     
-    vec4 disp  = texture(texture1, texcoord.xy);
-    disp = disp * (d_range.y - d_range.x) + vec4(d_range.x);
-    // disp = vec4(disp.x, -disp.y, -disp.z, 0.0f);
-    // disp = vec4(disp.x, disp.y, disp.z, 0.0f);
+    // vec4 disp  = texture(texture1, texcoord.xy);
+    // disp = disp * (d_range.y - d_range.x) + vec4(d_range.x);
+    // // disp = vec4(disp.x, -disp.y, -disp.z, 0.0f);
+    // // disp = vec4(disp.x, disp.y, disp.z, 0.0f);
 
-    tempPosition = tempPosition - vec4(disp.xyz, 0.0f);
+    // tempPosition = tempPosition - vec4(disp.xyz, 0.0f);
 
-    //tempPosition = transform * tempPosition + vec4(trans, 0.0f);
+    tempPosition = transform * tempPosition + vec4(trans, 0.0f);
     tempPosition = proj * tempPosition;
 
     worldPosition = tempPosition; // world space
