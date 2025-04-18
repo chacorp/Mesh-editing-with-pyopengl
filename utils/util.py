@@ -207,5 +207,4 @@ def computeTangentBasis(vertex, uv):
         tangents[offset]   = tangent
         tangents[offset+1] = tangent
         tangents[offset+2] = tangent
-    # import pdb;pdb.set_trace()
     return tangents

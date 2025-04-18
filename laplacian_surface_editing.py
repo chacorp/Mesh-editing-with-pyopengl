@@ -84,32 +84,32 @@ def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
     return L, A
 
 def compute_edges(mesh):
-        """
-        Computes edges in packed form from the packed version of faces and verts.
-        reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/structures/meshes.html#Meshes.edges_packed
-        """
-        
-        faces = mesh.faces_packed()
-        v0, v1, v2 = faces.chunk(3, dim=1)
-        e01 = torch.cat([v0, v1], dim=1)  # (sum(F_n), 2)
-        e12 = torch.cat([v1, v2], dim=1)  # (sum(F_n), 2)
-        e20 = torch.cat([v2, v0], dim=1)  # (sum(F_n), 2)
+    """
+    Computes edges in packed form from the packed version of faces and verts.
+    reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/structures/meshes.html#Meshes.edges_packed
+    """
+    
+    faces = mesh.faces_packed()
+    v0, v1, v2 = faces.chunk(3, dim=1)
+    e01 = torch.cat([v0, v1], dim=1)  # (sum(F_n), 2)
+    e12 = torch.cat([v1, v2], dim=1)  # (sum(F_n), 2)
+    e20 = torch.cat([v2, v0], dim=1)  # (sum(F_n), 2)
 
-        # All edges including duplicates.
-        edges = torch.cat([e12, e20, e01], dim=0)  # (sum(F_n)*3, 2)
-        
-        # rows in edges after sorting will be of the form (v0, v1) where v1 > v0.
-        edges, _ = edges.sort(dim=1)
+    # All edges including duplicates.
+    edges = torch.cat([e12, e20, e01], dim=0)  # (sum(F_n)*3, 2)
+    
+    # rows in edges after sorting will be of the form (v0, v1) where v1 > v0.
+    edges, _ = edges.sort(dim=1)
 
-        # Remove duplicate edges: convert each edge (v0, v1) into an
-        # integer hash = V * v0 + v1; this is much faster than edges.unique(dim=1)
-        # After finding the unique elements reconstruct the vertex indices as:
-        # (v0, v1) = (hash / V, hash % V)
-        V = mesh.verts_packed.shape[0]
-        edges_hash = V * edges[:, 0] + edges[:, 1]
-        uqe, inverse_idxs = torch.unique(edges_hash, return_inverse=True)
-        
-        return torch.stack([uqe // V, uqe % V], dim=1)
+    # Remove duplicate edges: convert each edge (v0, v1) into an
+    # integer hash = V * v0 + v1; this is much faster than edges.unique(dim=1)
+    # After finding the unique elements reconstruct the vertex indices as:
+    # (v0, v1) = (hash / V, hash % V)
+    V = mesh.verts_packed.shape[0]
+    edges_hash = V * edges[:, 0] + edges[:, 1]
+    uqe, inverse_idxs = torch.unique(edges_hash, return_inverse=True)
+    
+    return torch.stack([uqe // V, uqe % V], dim=1)
         
 
 def laplacian_matrix_ring(mesh):

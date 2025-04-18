@@ -88,7 +88,7 @@ def load_obj_mesh(mesh_path, norm=True):
     mesh.fn = np.array(face_normal) -1
     return mesh
 
-def main(mesh_file, image_path, resolution=1024, json_object=None, timer=False):
+def main(mesh_file, image_path, resolution=1024, json_object=None):
     
     if len(mesh_file) == 0:
         mesh_file = r"data\scan.obj"
@@ -105,11 +105,6 @@ def main(mesh_file, image_path, resolution=1024, json_object=None, timer=False):
             json_object = json.load(f)
     else:
         json_object = None
-
-
-    if timer == True:
-        import time
-        start = time.time()
     
     v, f, vt, ft, vn = mesh.v, mesh.f, mesh.vt, mesh.ft, mesh.vn
     

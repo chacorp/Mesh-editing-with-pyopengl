@@ -77,7 +77,7 @@ def load_obj_mesh(mesh_path, norm=True):
     mesh.fn = np.array(face_normal) -1
     return mesh
 
-def main(from_mesh, to_mesh, image_path, resolution=1024):
+def main(from_mesh, to_mesh, image_path, resolution=1024, use_imgui=False):
     
     ############################################## window init ###########
     if not glfw.init():
@@ -240,7 +240,7 @@ def main(from_mesh, to_mesh, image_path, resolution=1024):
     ######################################################################
 
     ############################################## imgui #################
-    use_imgui = False
+    
     if use_imgui:
         imgui.create_context()
         # window = impl_glfw_init() # already initialized!
