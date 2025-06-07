@@ -416,9 +416,19 @@ def main(from_mesh, to_mesh, image_path, resolution=1024, use_imgui=False):
 
 if __name__ == '__main__':
     
-    main(from_mesh = r"D:\test\Mesh-editing-with-pyopengl\_tmp\test.obj", # from
-         to_mesh = r"D:\test\Mesh-editing-with-pyopengl\_tmp\016039.obj", # to
-         image_path= r"D:\test\Mesh-editing-with-pyopengl\_tmp\material_0.png")
+    # main(
+    #     from_mesh = r"data\test.obj", # from
+    #     to_mesh = r"data\untitled2.obj", # to
+    #     image_path= r"data\material_0.png",
+    #     use_imgui=False
+    # )
+    
+    main(
+        from_mesh = r"data\untitled2.obj", # to
+        to_mesh = r"data\test.obj", # from
+        image_path= r"data\untitled2_tex.png",
+        use_imgui=False
+    )
         
     # main(
     #     from_mesh = r"D:\test\Mesh-editing-with-pyopengl\_tmp\016039.obj", 
