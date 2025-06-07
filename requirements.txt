@@ -9,3 +9,6 @@ easydict
 imgui[glfw]
 scikit-learn
 PyGLM
+open3d
+libigl
+robust_laplacian
