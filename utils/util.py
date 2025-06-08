@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+from scipy.spatial import cKDTree
 
 # ------------------------ Laplacian Matrices ------------------------ #
 # This file contains implementations of differentiable laplacian matrices.
@@ -208,3 +208,87 @@ def computeTangentBasis(vertex, uv):
         tangents[offset+1] = tangent
         tangents[offset+2] = tangent
     return tangents
+
+def decimate_mesh(mesh, target_faces):
+    """decimate mesh
+    Args:
+        mesh (trimesh.Trimesh)
+    Return
+        decimated_mesh (trimesh.Trimesh)
+    """
+    decimated_mesh = mesh.simplify_quadric_decimation(target_faces)
+    return decimated_mesh
+
+def map_vertices(original_mesh, decimated_mesh):
+    """
+    Get nearest neighbor vertex on original mesh
+    Args:
+        original_mesh (trimesh.Trimesh)
+        decimated_mesh (trimesh.Trimesh)
+    Return
+        distances (np.ndarray): distance with the nearest neighbor vertex on original mesh
+        vertex_map (np.ndarray): index of the nearest neighbor vertex on original mesh
+    """
+    tree = cKDTree(original_mesh.vertices)
+    distances, vertex_map = tree.query(decimated_mesh.vertices, k=1)
+    return distances, vertex_map
+
+def get_new_mesh(vertices, faces, v_idx, invert=False):
+    """calculate standardized mesh
+    Args:
+        vertices (torch.tensor): [V, 3] array of vertices 
+        faces (torch.tensor): [F, 3] array of face indices 
+        v_idx (torch.tensor): [N] list of vertex index to remove from mesh
+    Return:
+        updated_verts (torch.tensor): [V', 3] new array of vertices 
+        updated_faces (torch.tensor): [F', 3] new array of face indices  
+        updated_verts_idx (torch.tensor): [N] list of vertex index to remove from mesh (fixed)
+    """
+    max_index = vertices.shape[0]
+    new_vertex_indices = torch.arange(max_index)
+
+    if invert:
+        mask = torch.zeros(max_index, dtype=torch.bool)
+        mask[v_idx] = 1
+    else:
+        mask = torch.ones(max_index, dtype=torch.bool)
+        mask[v_idx] = 0
+
+    updated_verts     = vertices[mask]
+    updated_verts_idx = new_vertex_indices[mask]
+
+    index_mapping = {old_idx.item(): new_idx for new_idx, old_idx in enumerate(updated_verts_idx)}
+
+    updated_faces = torch.tensor([
+                    [index_mapping.get(idx.item(), -1) for idx in face]
+                    for face in faces
+                ])
+    valid_faces = ~torch.any(updated_faces == -1, dim=1)
+    updated_faces = updated_faces[valid_faces]
+    return updated_verts, updated_faces, updated_verts_idx
+
+def decimate_mesh_vertex(mesh, num_vertex, tolerance=2, verbose=False):
+    """
+    Decimate the mesh to have approximately the target number of vertices.
+    Args:
+        mesh (trimesh.Trimesh): Mesh to decimate.
+        num_vertex (int): Target vertex number.
+    Return:
+        mesh (trimesh.Trimesh): Decimated mesh.
+    """
+    
+    #NOTE Euler Characteristic: V - E + F = 2
+    num_faces = 100 + 2 * num_vertex
+    prev_num_faces = mesh.faces.shape[0]
+    
+    while abs(mesh.vertices.shape[0] - num_vertex) > tolerance:
+        if num_faces == prev_num_faces:
+            num_faces = num_faces -1
+        mesh = mesh.simplify_quadric_decimation(num_faces)
+        if verbose:
+            print("Decimated to", num_faces, "faces, mesh has", mesh.vertices.shape[0], "vertices")
+        num_faces -= (mesh.vertices.shape[0] - num_vertex) // 2
+        prev_num_faces = num_faces
+    if verbose:
+        print('Output mesh has', mesh.vertices.shape[0], 'vertices and', mesh.faces.shape[0], 'faces')
+    return mesh
