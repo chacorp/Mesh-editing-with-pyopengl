@@ -12,3 +12,4 @@ PyGLM
 open3d
 libigl
 robust_laplacian
+chamferdist
