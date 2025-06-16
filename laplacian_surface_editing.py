@@ -1,29 +1,27 @@
 from __future__ import print_function
 
+import sys
 import os
 from os.path import exists, join
 # from glob import glob
 import numpy as np
 
+import scipy
+from scipy.sparse import diags
+
 import glfw
 from OpenGL.GL import *
 import OpenGL.GL.shaders as shaders
-import numpy as np
+
 from PIL import Image
 import glm
-from easydict import EasyDict
 
 # from testwindow import *
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
-import sys
-from pytorch3d.io import load_objs_as_meshes
-import scipy.sparse
+
 import torch
 
-import scipy
-from scipy.sparse import diags
-import numpy as np
 
 # ------------------------ Laplacian Matrices ------------------------ #
 # This file contains implementations of differentiable laplacian matrices.
@@ -75,7 +73,7 @@ def laplacian_matrix_ring(mesh):
         - https://github.com/luost26/laplacian-surface-editing/blob/master/main.py
 
     Args:
-        mesh (EasyDict): contains the mesh properties
+        mesh (class): contains the mesh properties
 
     Returns:
         LS (np.array): Laplacian matrix with ring coordinates
@@ -87,8 +85,8 @@ def laplacian_matrix_ring(mesh):
     L = mesh.L.todense()
     
     # laplacian coordinates :: Delta = L @ V
-    # Delta = mesh.Delta
-    Delta = np.concatenate([mesh.Delta, np.ones([N, 1])], axis=-1)
+    # delta = mesh.delta
+    delta = np.concatenate([mesh.delta, np.ones([N, 1])], axis=-1)
     
     # print(L.shape)
     # print(3*N)
@@ -151,9 +149,9 @@ def laplacian_matrix_ring(mesh):
             # [  t[0],  t[1],  t[2], ones_3,],
         ])
         
-        # T_delta = (Ti @ Delta[i])
-        T_delta =(Ti.transpose(2,0,1) @ Delta[i].T).transpose(1,0)
-        # T_delta = (Delta[i].T @ Ti )
+        # T_delta = (Ti @ delta[i])
+        T_delta =(Ti.transpose(2,0,1) @ delta[i].T).transpose(1,0)
+        # T_delta = (delta[i].T @ Ti )
         
         # import pdb; pdb.set_trace()
         
@@ -171,10 +169,10 @@ def laplacian_matrix_ring(mesh):
         
     return LS
 
-def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos):
+def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos, Wb=1.0):
     """
     Args:
-        mesh (EasyDict):        mesh properties
+        mesh (class):        mesh properties
         boundary_idx (list):    vertex indices of boundary
         handle_idx (list):      vertex indices of handle
         handle_pos (np.array):  displacement of handle
@@ -187,26 +185,28 @@ def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos):
     N  = mesh.v.shape[0]
     LS = mesh.LS
     # ------------------- Add Constraints to the Linear System ------------------- #
-    constraint_coef = np.zeros([3*N + len(handle_idx)*3, 3*N])
-    constraint_b    = np.zeros([3*N + len(handle_idx)*3])
+    len_H = len(handle_idx)
+    constraint_coef = np.zeros([3*N + 3*len_H, 3*N])
+    constraint_b    = np.zeros([3*N + 3*len_H])
     
     # Boundary constraints
     i = 0
+    h = 0
+    
     # for idx in boundary_idx:
     for idx, val in enumerate(mask):
         idx_c = [i*3+0, i*3+1, i*3+2] # index of Boundary constraint
         idx_v = [idx, idx+N, idx+2*N] # index of v in V
         
         if val == 0:
-            constraint_coef[idx_c, idx_v] = 1.0 # one-hot
-            constraint_b[idx_c]           = V[idx] # fixed position
+            constraint_coef[idx_c, idx_v] = 1.0 * Wb # one-hot
+            constraint_b[idx_c]           = V[idx] * Wb # fixed position
         else:
             constraint_coef[idx_c, idx_v] = 0
             constraint_b[idx_c]           = 0
         i = i + 1
         
     # Handle constraints
-    h = 0
     for idx in handle_idx:
         idx_c = [i*3+0, i*3+1, i*3+2] # index of Handle constraint
         idx_v = [idx, idx+N, idx+2*N] # index of v in V
@@ -314,11 +314,11 @@ class Mesh_container():
         self.compute_edges()
         
         self.L, self.Adj    = laplacian_and_adjacency(self.v.shape[0], self.e)
-        self.Delta          = self.L @ self.v
+        self.delta          = self.L @ self.v
         
         self.ring_indices   = [self.Adj[i].indices.tolist() for i in range(self.v.shape[0])]
         
-        self.mask_v = torch.zeros([self.v.shape[0],1]).type(torch.int)
+        self.mask_v = np.zeros([self.v.shape[0],1]).astype(int)
         self.mask_v[boundary_idx] = 1
         for h_idx in handle_idx:
             recurr_adj(self.mask_v, self.Adj, h_idx, boundary_idx)
@@ -353,7 +353,8 @@ class Mesh_container():
         edges_hash = V * edges[:, 0] + edges[:, 1]
         uqe, inverse_idxs = torch.unique(edges_hash, return_inverse=True)
         
-        self.e = torch.stack([uqe // V, uqe % V], dim=1)
+        uqe_V = uqe.div(V, rounding_mode='floor')
+        self.e = torch.stack([uqe_V, uqe % V], dim=1)
 
     def load_obj_mesh(self, mesh_path):
         vertex_data = []
