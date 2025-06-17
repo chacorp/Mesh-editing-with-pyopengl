@@ -26,9 +26,8 @@ import torch
 # ------------------------ Laplacian Matrices ------------------------ #
 # This file contains implementations of differentiable laplacian matrices.
 # These include
-# 1) Standard Laplacian matrix
+# 1) Uniform Laplacian matrix
 # 2) Cotangent Laplacian matrix
-# 3) Norm Laplacian matrix
 # -------------------------------------------------------------------- #
 
 def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
@@ -86,87 +85,79 @@ def laplacian_matrix_ring(mesh):
     
     # laplacian coordinates :: Delta = L @ V
     # delta = mesh.delta
-    delta = np.concatenate([mesh.delta, np.ones([N, 1])], axis=-1)
+    # delta = np.concatenate([mesh.delta, np.ones([N, 1])], axis=-1)
+    delta = mesh.L @ np.concatenate([mesh.v, np.ones([N, 1])], axis=-1)
     
     # print(L.shape)
     # print(3*N)
     LS = np.zeros([3*N, 3*N])
-    # LS[0::3, 0::3] = (-1) * L
-    # LS[1::3, 1::3] = (-1) * L
-    # LS[2::3, 2::3] = (-1) * L
-    LS[0*N:1*N, 0*N:1*N] = -L
-    LS[1*N:2*N, 1*N:2*N] = -L
-    LS[2*N:3*N, 2*N:3*N] = -L
+    LS[0*N:1*N, 0*N:1*N] = -1*L
+    LS[1*N:2*N, 1*N:2*N] = -1*L
+    LS[2*N:3*N, 2*N:3*N] = -1*L
     
     # compute the l
     for i in range(N):
         nb_idx      = mesh.ring_indices[i]
         ring        = np.array([i] + nb_idx)
         n_ring      = len(ring)
+        V_ring      = V[ring]
         
         Ai          = np.zeros([n_ring * 3, 7])
         zer0_ring   = np.zeros(n_ring)
         ones_ring   = np.ones(n_ring)
         
-        V_ring      = V[ring].numpy()
+        
         Ai[:n_ring,        ] = np.stack([V_ring[:,0],    zer0_ring,  V_ring[:,2], -V_ring[:,1], ones_ring, zer0_ring, zer0_ring], axis=1)
         Ai[n_ring:2*n_ring,] = np.stack([V_ring[:,1], -V_ring[:,2],    zer0_ring,  V_ring[:,0], zer0_ring, ones_ring, zer0_ring], axis=1)
         Ai[2*n_ring:,      ] = np.stack([V_ring[:,2],  V_ring[:,1], -V_ring[:,0],    zer0_ring, zer0_ring, zer0_ring, ones_ring], axis=1)
-        # Ai[:n_ring,           4] = 1
-        # Ai[n_ring:2*n_ring,   5] = 1
-        # Ai[2*n_ring:,         6] = 1
-        
-        # import pdb; pdb.set_trace()
         
         # Moore-Penrose Inversion
         AiTAi_pinv = np.linalg.pinv(Ai.T @ Ai)
         Ai_pinv = AiTAi_pinv @ Ai.T
-                
-        s = Ai_pinv[0]
-        h = Ai_pinv[1:4]
-        t = Ai_pinv[4:7]
         
-        ones_3 = np.ones(n_ring * 3)
-        zer0_3 = np.zeros(n_ring * 3)
+        si = Ai_pinv[0]
+        hi = Ai_pinv[1:4]
+        ti = Ai_pinv[4:7]
         
         Ti = np.array([
-            # [    s ,  -h[2],  h[1],],
-            # [  h[2],    s ,  -h[0],],
-            # [ -h[1],  h[0],     s ,],
+            # [     si,  -hi[2],  hi[1], zer0_3],
+            # [  hi[2],      si, -hi[0], zer0_3],
+            # [ -hi[1],   hi[0],     si, zer0_3],
             
-            [    s , -h[2],  h[1],  t[0],],
-            [  h[2],    s , -h[0],  t[1],],
-            [ -h[1],  h[0],    s ,  t[2],],
-            [zer0_3,zer0_3,zer0_3,ones_3,],
+            # [    si,  -hi[2],  hi[1], ones_3],
+            # [  hi[2],     si,  -hi[0], ones_3],
+            # [ -hi[1],  hi[0],      si, ones_3],
             
-            # [    s ,  h[2], -h[1],],
-            # [ -h[2],    s ,  h[0],],
-            # [  h[1], -h[0],    s ,],
+            # [     si, -hi[2],  hi[1],],
+            # [  hi[2],     si, -hi[0],],
+            # [ -hi[1],  hi[0],     si,],
             
-            # [    s,   h[2], -h[1], zer0_3,],
-            # [ -h[2],     s,  h[0], zer0_3,],
-            # [  h[1], -h[0],     s, zer0_3,],
-            # [  t[0],  t[1],  t[2], ones_3,],
+            [     si, -hi[2],  hi[1],  ti[0],],
+            [  hi[2],     si, -hi[0],  ti[1],],
+            [ -hi[1],  hi[0],     si,  ti[2],],
+            
+            # [     si,  hi[2], -hi[1],],
+            # [ -hi[2],     si,  hi[0],],
+            # [  hi[1], -hi[0],     si,],
+            # [ones_3,ones_3,ones_3,],
+            
+            # [     si,  hi[2], -hi[1],],
+            # [ -hi[2],     si,  hi[0],],
+            # [  hi[1], -hi[0],     si,],
+            # [  ti[0],  ti[1],  ti[2],],
         ])
         
         # T_delta = (Ti @ delta[i])
         T_delta =(Ti.transpose(2,0,1) @ delta[i].T).transpose(1,0)
-        # T_delta = (delta[i].T @ Ti )
-        
-        # import pdb; pdb.set_trace()
+        # T_delta =(Ti.transpose(2,1,0) @ delta[i].T).transpose(1,0)
+        # T_delta = (delta[i].T @ Ti ).squeeze()
         
         rind_idxs = np.hstack([ring, ring+N, ring+2*N])
-        LS[[i, i+N, i+2*N]][:, rind_idxs] += T_delta[:3]
-        # LS[i,     rind_idxs] += T_delta[0]
-        # LS[i+N,   rind_idxs] += T_delta[1]
-        # LS[i+2*N, rind_idxs] += T_delta[2]
-        
-        # import pdb;pdb.set_trace()
-        # rind_idxs = np.hstack([0+ring*3, 1+ring*3, 2+ring*3])
-        # LS[i*3+0:i*3+3*n_ring:3, ring] += T_delta[0]
-        # LS[i*3+1, rind_idxs] += T_delta[1]
-        # LS[i*3+2, rind_idxs] += T_delta[2]
-        
+        # LS[[i, i+N, i+2*N]][:, rind_idxs] += T_delta[:3]
+        LS[i,     rind_idxs] += T_delta[0]
+        LS[i+N,   rind_idxs] += T_delta[1]
+        LS[i+2*N, rind_idxs] += T_delta[2]
+    
     return LS
 
 def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos, Wb=1.0):
@@ -333,7 +324,7 @@ class Mesh_container():
         reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/structures/meshes.html#Meshes.edges_packed
         """
         
-        faces = self.f
+        faces = torch.tensor(self.f)
         v0, v1, v2 = faces.chunk(3, dim=1)
         e01 = torch.cat([v0, v1], dim=1)  # (sum(F_n), 2)
         e12 = torch.cat([v1, v2], dim=1)  # (sum(F_n), 2)
@@ -388,14 +379,14 @@ class Mesh_container():
                     ft = list(map(lambda x: int(x.split('/')[2]),  values[1:]))
                     face_normal.append(ft)
         
-        self.v  = normalize_torch(
-            torch.tensor(vertex_data)
+        self.v  = normalize_np(
+            np.array(vertex_data)
         )
-        self.vn = torch.tensor(vertex_normal)
-        self.vt = torch.tensor(vertex_texture)
-        self.f  = torch.tensor(face_data)
-        self.ft = torch.tensor(face_texture)
-        self.fn = torch.tensor(face_normal)
+        self.vn = np.array(vertex_normal)
+        self.vt = np.array(vertex_texture)
+        self.f  = np.array(face_data)
+        self.ft = np.array(face_texture)
+        self.fn = np.array(face_normal)
         if self.f.min() > 0:
             self.f  = self.f  - 1
             self.ft = self.ft - 1
@@ -408,13 +399,11 @@ def main(resolution=512,
          ):
     ### sphere mesh
     path                = "data/sphere.obj"
-    # path               = r"experiment\faces\FLAME_with_normal.obj"
     
     ## for loading face and other stuff: vt, vn, ft, fn ...
     mesh = Mesh_container(path, boundary_idx=boundary_idx, handle_idx=handle_idx)
     mask_v = mesh.mask_v
     
-        
     image_path  = "checkerboard.png"
 
     rendered    = render(mesh, resolution, image_path, boundary_idx=boundary_idx, handle_idx=handle_idx, mask_v=mask_v)
@@ -468,13 +457,13 @@ def render(mesh,
 
     glfw.make_context_current(window)
 
-    new_vt = vt[ft].reshape(-1,2).numpy()
+    new_vt = vt[ft].reshape(-1,2)
     new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
-    new_v  = v[f].reshape(-1, 3).numpy()
+    new_v  = v[f].reshape(-1, 3)
     
     # if f.max() == vn.shape[0]:
     if True:
-        new_vn = vn[mesh.fn].reshape(-1, 3).numpy()
+        new_vn = vn[mesh.fn].reshape(-1, 3)
     else:
         new_vn = vn[f].reshape(-1, 3)
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
@@ -683,7 +672,7 @@ def render(mesh,
                 imgui.text("d_range: {}".format(d_range))
             imgui.text("handle_pos_new: {}".format(handle_pos_new))
             imgui.text("handle_pos[0]: {}".format(handle_pos[0]))
-            imgui.text("renew[0]: {}".format(mesh.v[0].numpy()+handle_pos_new))
+            imgui.text("renew[0]: {}".format(mesh.v[0]+handle_pos_new))
             # imgui.text("handle_pos_old: {}".format(handle_pos_old))
             
             clicked, tex_alpha  = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
