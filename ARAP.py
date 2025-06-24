@@ -30,7 +30,7 @@ import igl
 # 2) Cotangent Laplacian matrix
 # -------------------------------------------------------------------- #
 
-def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
+def adjacency(verts_N, edges, return_idx=False):
     """
     Reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/ops/laplacian_matrices.html
     
@@ -57,9 +57,41 @@ def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
     
     ones = np.ones(idx.shape[1])
     A  = scipy.sparse.csr_matrix((ones, idx), shape=(V, V))
+    if return_idx:
+        return A, idx
+    return A
+
+def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
+    """
+    Reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/ops/laplacian_matrices.html
+    
+    Computes the laplacian matrix.
+    The definition of the laplacian is
+    L[i, j] =    -1       , if i == j
+    L[i, j] = 1 / deg(i)  , if (i, j) is an edge
+    L[i, j] =    0        , otherwise
+    where deg(i) is the degree of the i-th vertex in the graph.
+
+    Args:
+        verts_N: number of vertices (N) of the mesh (N, 3)
+        edges:   tensor of shape (E, 2) containing the vertex indices of each edge
+    Returns:
+        L: Sparse FloatTensor of shape (V, V)
+        A: Adjacency matrix (V, V)
+    """
+    # V = verts_N
+    # E = edges.numpy()
+    
+    # idx01 = np.stack([E[:,0], E[:,1]], axis=1)  # (E, 2)
+    # idx10 = np.stack([E[:,1], E[:,0]], axis=1)  # (E, 2)
+    # idx = np.r_[idx01, idx10].T  # (2, 2*E)
+    
+    # ones = np.ones(idx.shape[1])
+    # A  = scipy.sparse.csr_matrix((ones, idx), shape=(V, V))
+    A = adjacency(verts_N, edges, return_idx=False)
     
     degree = np.asarray(A.sum(axis=1)).squeeze()
-    I_ = scipy.sparse.identity(V)
+    I_ = scipy.sparse.identity(verts_N)
     D_ = diags(1/degree) @ A
     L = I_ - D_
     
@@ -118,9 +150,9 @@ def laplacian_cotangent(verts, faces, eps=1e-12):
     
     
     # Construct sparse matrix L
-    # L = (L + L.T).tocsr()  # Make symmetric
-    # i_is_j = np.asarray(L.sum(axis=1)).squeeze()
-    # L = scipy.sparse.diags(i_is_j) - L
+    L = (L + L.T).tocsr()  # Make symmetric
+    i_is_j = np.asarray(L.sum(axis=1)).squeeze()
+    L = scipy.sparse.diags(i_is_j) - L
     
     # Compute inverse area per vertex
     idx = faces.reshape(-1)
@@ -133,13 +165,75 @@ def laplacian_cotangent(verts, faces, eps=1e-12):
 
     return L, inv_areas
 
+def get_rotation(mesh):
+    N = mesh.v.shape[0]
+    RS = np.zeros([N, 3, 3])
+    for i in range(N):
+        ring = np.array(mesh.ring_indices[i])
+        wij = np.array([mesh.L[i, j] for j in ring])
+        D_ring = np.diag(wij)
+
+        E_ring       = (mesh.v[i] - mesh.v[ring]).T # (3, Nj)
+        E_prime_ring = (mesh.v_prime[i] - mesh.v_prime[ring]).T  # (3, Nj)
+
+        # (3, N) x (N, N) x (N, 3)
+        S_i = E_ring @ D_ring @ E_prime_ring.T
+        u_i, _, vt_i = np.linalg.svd(S_i)
+        
+        R_i = vt_i.T @ u_i.T
+
+        if np.linalg.det(R_i) < 0:
+            vt_i[-1, :] *= -1
+            R_i = vt_i.T @ u_i.T
+
+        RS[i] = R_i
+        # RS[i] = np.eye(3)
+    return RS
+
 def laplacian_matrix_ring(mesh):
+    """
+    Args:
+        mesh (class): contains mesh properties
+            vertices, vertices prime, L (cotangent Laplacian) and mesh.ring_indices ...
+
+    Returns:
+        LS (np.array): 3N x 3N Laplacian matrix with ARAP rotation terms
+    """
+    N = mesh.v.shape[0]
+    RS = get_rotation(mesh)
+
+    LS = np.zeros((3*N, 3*N))
+    for i in range(N):
+        ring = np.array(mesh.ring_indices[i])
+        disk = np.array([i] + mesh.ring_indices[i])
+        n_ring = len(ring)
+
+        disk_idxs = np.hstack([disk, disk + N, disk + 2*N])
+        wij = np.array([mesh.L[i, j] for j in ring])[:, None, None]  # (Nj, 1, 1)
+
+        Ri = RS[i][None]
+        Rj = RS[ring]  # (Nj, 3, 3)
+        wij_Ri_Rj = 0.5 * wij * (Ri + Rj)  # (Nj, 3, 3)
+
+        wij_Ri = wij_Ri_Rj.sum(axis=0)  # (3, 3)
+        all_blocks = np.vstack([-wij_Ri[None], wij_Ri_Rj])  # (Nj+1, 3, 3)
+        
+        # (disk, 3, 3) --> (3, 3, disk) | disk:{i, j0, j1, j2,...jn}
+        all_blocks = all_blocks.transpose(1, 2, 0).reshape(3, 3*(n_ring+1)) # (3, 3*(Nj+1))
+
+        LS[i,     disk_idxs] += all_blocks[0]
+        LS[i+N,   disk_idxs] += all_blocks[1]
+        LS[i+2*N, disk_idxs] += all_blocks[2]
+
+    return LS
+
+def laplacian_matrix_ring2(mesh):
     """
     Args:
         mesh (class): contains the mesh properties
 
     Returns:
-        LS (np.array): Laplacian matrix with ring coordinates
+        LS (np.array): 3N x 3N Laplacian matrix with rotation matrix in ring coordinates
     """
     
     N = mesh.v.shape[0]
@@ -151,7 +245,8 @@ def laplacian_matrix_ring(mesh):
         ring = np.array(mesh.ring_indices[i])
         disk = np.array([i] + mesh.ring_indices[i])
         
-        wij = mesh.L[i].data[1:]
+        wij = mesh.L[i, ring].data[1:]
+        # wij = mesh.L[i].data[1:]
         D_ring = np.diag(wij)
         
         # import pdb;pdb.set_trace()
@@ -159,8 +254,8 @@ def laplacian_matrix_ring(mesh):
         E_prime_ring = (mesh.v_prime[i] - mesh.v_prime[ring]).T # (3, N)
         
         # (3, N) x (N, N) x (N, 3)
-        # S_i = E_ring @ D_ring @ E_prime_ring.T
-        S_i = E_ring @ E_prime_ring.T
+        S_i = E_ring @ D_ring @ E_prime_ring.T
+        # S_i = E_ring @ E_prime_ring.T
         
         u_i, s_i, vt_i = np.linalg.svd(S_i)
         
@@ -184,13 +279,14 @@ def laplacian_matrix_ring(mesh):
         
         
         disk_idxs = np.hstack([disk, disk+N, disk+2*N])
-        # ring_idxs = np.hstack([ring, ring+N, ring+2*N])
+        ring_idxs = np.hstack([ring, ring+N, ring+2*N])
         # i_idxs = np.hstack([i, i+N, i+2*N])
         
-        # wij = 0.5 * mesh.LS[[i, i+N, i+2*N]][:, ring_idxs].reshape(3, 3, n_ring).transpose(2,0,1)
-        wij = 0.5 * mesh.L[i, ring].data[:,None,None]
+        # wij = 0.5 * mesh.LS[[i, i+N, i+2*N]][:, ring_idxs].reshape(3, 3, n_ring).transpose(2,0,1) # (Nj, 3,3)
+        wij = 0.5 * mesh.L[i, ring].data[:,None,None] # (Nj, 1,1)
+        # print(wij.shape)
         
-        # wij/2 * (Ri + Rj)(pi - pj)
+        # wij/2 * (Ri + Rj) (pi - pj)
         wij_Ri_Rj = wij * (RS[i][None] + RS[ring])
         
         wij_Ri = wij_Ri_Rj.sum(0)
@@ -450,7 +546,7 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
     # b = np.vstack([np.zeros((N,3)), constraint_b])
     
     ATA = scipy.sparse.coo_matrix(A.T @ A)
-    lu = scipy.sparse.linalg.splu(ATA.tocsc())
+    lu = scipy.sparse.linalg.splu(ATA.tocsr())
     
     ATb = A.T @ b
     v_prime = lu.solve(ATb)
@@ -463,8 +559,9 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
         # import pdb;pdb.set_trace()
         
         # rhs = mesh.LS @ mesh.v.transpose(1,0).reshape(-1)
-        rhs = laplacian_matrix_ring(mesh) @ mesh.v.transpose(1,0).reshape(-1)
-        rhs = rhs.reshape(3,-1).transpose(1,0)
+        rhs = laplacian_matrix_ring(mesh) @ mesh.v.transpose(1, 0).reshape(-1)
+        rhs = rhs.reshape(3,-1).transpose(1, 0)
+        # b = np.vstack([rhs])
         b = np.vstack([rhs, constraint_b])
         
         ATb = A.T @ b
@@ -564,12 +661,8 @@ def compute_triangle_normals(V, F, eps=1e-8):
     return normals
 
 def compute_vertex_normals(V, F, eps=1e-8):
-    # V = V.astype(np.float64)
     N = V.shape[0]
     Vn = np.zeros((N, 3))
-    # tri = V[F]
-    # n = np.cross(tri[:,1] - tri[:,0], tri[:,2] - tri[:,0])
-    # n /= np.linalg.norm(n, axis=1, keepdims=True) + eps
     n = compute_triangle_normals(V, F)
     
     for i in range(3):
@@ -582,7 +675,8 @@ class Mesh_container():
         self.load_obj_mesh(mesh_path)
         self.compute_edges()
         
-        self.L, self.Adj            = laplacian_and_adjacency(self.v.shape[0], self.e)
+        # self.L, self.Adj = laplacian_and_adjacency(self.v.shape[0], self.e)
+        self.Adj = adjacency(self.v.shape[0], self.e, return_idx=False)
         
         ## cotangent laplacian        
         # something gone wrong...!
@@ -685,38 +779,7 @@ class Mesh_container():
             self.ft = self.ft - 1
             self.fn = self.fn - 1
         
-    
-def main(
-    # mesh_path = "data/sphere_trimesh.obj"
-    mesh_path = "data/sphere.obj",
-    resolution=512,
-    boundary_idx = [3, 13, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
-    # boundary_idx = [8, 21, 36, 51, 66, 81, 96, 111, 126, 141, 156, 171, 186, 201, 216, 231, 246, 261, 276, 291, 306, 321, 337, 352, 367, 382, 397, 412, 427, 442, 457, 472],
-    # handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
-    handle_idx   = [325],
-    ):
-    ### sphere mesh
-    # path                = "data/sphere_trimesh.obj"
-    # mesh_path                = "data/sphere.obj"
-    
-    ## for loading face and other stuff: vt, vn, ft, fn ...
-    mesh = Mesh_container(mesh_path, boundary_idx=boundary_idx, handle_idx=handle_idx)
-    mask_v = mesh.mask_v
-    image_path  = "checkerboard.png"
 
-    rendered    = render(mesh, resolution, image_path, boundary_idx=boundary_idx, handle_idx=handle_idx, mask_v=mask_v)
-    rendered    = rendered[::-1, :, :]
-    
-    # make directory
-    savefolder  = join('LSE')
-    if not exists(savefolder):
-        os.makedirs(savefolder)
-    
-    savefile    = join(savefolder, 'experiemtn.png')
-
-    Image.fromarray(rendered).save(savefile)
-    return
- 
 def render(mesh, 
          resolution, 
          image_path, 
@@ -826,7 +889,9 @@ def render(mesh,
         textureB = load_texture(boundary_mask_path)
     ############################################## uniform ###############
     i = 0
-    rotation_ = 0
+    rotation_X = 0
+    rotation_Y = 0
+    rotation_Z = 0
     
     H_rot_x = 0
     H_rot_y = 0
@@ -915,14 +980,19 @@ def render(mesh,
                 glBindTexture(GL_TEXTURE_2D, texture1)
             
         ### trans * rotate * scale * 3D model
-        rotation_mat = y_rotation(rotation_)
+        rotation_Xmat = x_rotation(rotation_X)
+        rotation_Ymat = y_rotation(rotation_Y)
+        rotation_Zmat = z_rotation(rotation_Z)
         affine_mat = np.eye(4)
         
         affine_mat[:3,:3] = affine_mat[:3,:3] * np.array([scaleX, scaleY, scaleZ])
         trans = np.array([transX, transY, transZ])
-        rotation_mat = rotation_mat @  affine_mat.T
+        # rotation_Ymat = rotation_Ymat @  affine_mat.T
         
-        glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat)
+        rotation_mat_all = rotation_Zmat @ rotation_Ymat @ rotation_Xmat @ affine_mat.T
+        
+        # glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_Ymat)
+        glUniformMatrix4fv(transform, 1, GL_FALSE, rotation_mat_all)
         glUniform3fv(translate, 1, trans)
         
         view = glm.ortho(-1.0*zoom, 1.0*zoom, -1.0*zoom, 1.0*zoom, 0.0001, 1000.0) 
@@ -982,9 +1052,12 @@ def render(mesh,
             imgui.text("renew[0]: {}".format(mesh.v[0]+handle_pos_new))
             # imgui.text("handle_pos_old: {}".format(handle_pos_old))
             
-            clicked, tex_alpha  = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
-            clicked, _ratio     = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
-            clicked, rotation_  = imgui.slider_float(label="Rotate", value=rotation_, min_value=0.0, max_value=360.0,)
+            # clicked, tex_alpha  = imgui.slider_float(label="_alpha",    value=tex_alpha, min_value=0.0, max_value=1.0)
+            # clicked, _ratio     = imgui.slider_float(label="_ratio",    value=_ratio, min_value=0.0, max_value=1.0)
+            
+            clicked, rotation_X  = imgui.slider_float(label="Rotate X", value=rotation_X, min_value=-180.0, max_value=180.0,)
+            clicked, rotation_Y  = imgui.slider_float(label="Rotate Y", value=rotation_Y, min_value=-180.0, max_value=180.0,)
+            clicked, rotation_Z  = imgui.slider_float(label="Rotate Z", value=rotation_Z, min_value=-180.0, max_value=180.0,)
             
             clicked, scaleX     = imgui.slider_float(label="Scale x",   value=scaleX, min_value= 0.0,  max_value= 10.0,)
             changed, scaleX     = imgui.input_float(label="set Scale x",value=scaleX, step=0.001)
@@ -1059,7 +1132,10 @@ def render(mesh,
                 H_rot_z     = 0.0
                 H_r_mat     = np.eye(4)
                 transZ      = -1.0
-                rotation_   = 0
+                rotation_X   = 0
+                rotation_Y   = 0
+                rotation_Z   = 0
+                
                 iteration_  = 0
                 normalize   = False
                 Reset_button= False
@@ -1067,7 +1143,12 @@ def render(mesh,
                 use_LSE = True
                 handle_pos_new = np.array([0.0, 0.0, 0.0])
                                 
-            rotation_ = rotation_ % 360
+            rotation_X = 180 if rotation_X <= -180 else rotation_X
+            rotation_Y = 180 if rotation_Y <= -180 else rotation_Y
+            rotation_Z = 180 if rotation_Z <= -180 else rotation_Z
+            # rotation_X = np.clip(rotation_X, -180, 180)
+            # rotation_Y = np.clip(rotation_Y, -180, 180)
+            # rotation_Z = np.clip(rotation_Z, -180, 180)
             H_rot_x   = H_rot_x % 360
             H_rot_y   = H_rot_y % 360
             H_rot_z   = H_rot_z % 360
@@ -1095,14 +1176,46 @@ def render(mesh,
     ################################################## imgui end ############
     glfw.terminate()
     return a
+  
+def main(
+    # mesh_path = "data/sphere_trimesh.obj"
+    mesh_path = "data/sphere.obj",
+    resolution=512,
+    boundary_idx = [3, 13, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
+    # boundary_idx = [8, 21, 36, 51, 66, 81, 96, 111, 126, 141, 156, 171, 186, 201, 216, 231, 246, 261, 276, 291, 306, 321, 337, 352, 367, 382, 397, 412, 427, 442, 457, 472],
+    handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
+    # handle_idx   = [325],
+    ):
+    ### sphere mesh
+    # path                = "data/sphere_trimesh.obj"
+    # mesh_path                = "data/sphere.obj"
+    
+    ## for loading face and other stuff: vt, vn, ft, fn ...
+    mesh = Mesh_container(mesh_path, boundary_idx=boundary_idx, handle_idx=handle_idx)
+    mask_v = mesh.mask_v
+    image_path  = "checkerboard.png"
 
+    rendered    = render(mesh, resolution, image_path, boundary_idx=boundary_idx, handle_idx=handle_idx, mask_v=mask_v)
+    rendered    = rendered[::-1, :, :]
+    
+    # make directory
+    savefolder  = join('LSE')
+    if not exists(savefolder):
+        os.makedirs(savefolder)
+    
+    savefile    = join(savefolder, 'experiemtn.png')
+
+    Image.fromarray(rendered).save(savefile)
+    return
+ 
+ 
 if __name__ == '__main__':
     main(
         resolution=1024,
         # mesh_path = "data/sphere.obj",
         mesh_path = "data/decimated_knight.obj",
-        # boundary_idx=[26, 56, 61, 79, 82, 90, 104, 124, 130, 179, 181, 190, 197, 198, 209, 247, 277, 354, 390, 391, 407, 417, 473],
-        # handle_idx=[144],
-        boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
-        handle_idx=[324],
+        boundary_idx=[26, 56, 61, 79, 82, 90, 104, 124, 130, 179, 181, 190, 197, 198, 209, 247, 277, 354, 390, 391, 407, 417, 473],
+        handle_idx=[144],
+        # boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
+        # handle_idx=[324],
     )
