@@ -37,6 +37,7 @@ void main()
 
     // vec4 tempColor = vec4(OutNormal, 0.0f) * zero + tex_col *0.5f  + diffuse*0.5f;
     vec4 tempColor = tex_col *0.5f  + diffuse*0.5f;
+    // vec4 tempColor = tex_col * zero  + diffuse;
     // vec4 tempColor = vec4(OutNormal, 0.0f) * zero + tex_col  + diffuse*zero;
     
     OutColor = tempColor;

@@ -159,8 +159,8 @@ def laplacian_matrix_ring(mesh):
         E_prime_ring = (mesh.v_prime[i] - mesh.v_prime[ring]).T # (3, N)
         
         # (3, N) x (N, N) x (N, 3)
-        S_i = E_ring @ D_ring @ E_prime_ring.T
-        # S_i = E_ring @ E_prime_ring.T
+        # S_i = E_ring @ D_ring @ E_prime_ring.T
+        S_i = E_ring @ E_prime_ring.T
         
         u_i, s_i, vt_i = np.linalg.svd(S_i)
         
@@ -555,6 +555,28 @@ def recurr_adj(mask_v, adj_mat, idx, boundary_idx):
             recurr_adj(mask_v, adj_mat, jdx, boundary_idx)
     return
 
+def compute_triangle_normals(V, F, eps=1e-8):
+    v0 = V[F[:, 0]]
+    v1 = V[F[:, 1]]
+    v2 = V[F[:, 2]]
+    normals = np.cross(v1 - v0, v2 - v0)
+    normals = normals / np.linalg.norm(normals, axis=1, keepdims=True) + eps
+    return normals
+
+def compute_vertex_normals(V, F, eps=1e-8):
+    # V = V.astype(np.float64)
+    N = V.shape[0]
+    Vn = np.zeros((N, 3))
+    # tri = V[F]
+    # n = np.cross(tri[:,1] - tri[:,0], tri[:,2] - tri[:,0])
+    # n /= np.linalg.norm(n, axis=1, keepdims=True) + eps
+    n = compute_triangle_normals(V, F)
+    
+    for i in range(3):
+        np.add.at(Vn, F[:,i], n)
+    Vn = Vn / np.linalg.norm(Vn, axis=1, keepdims=True) + eps
+    return Vn
+
 class Mesh_container():
     def __init__(self, mesh_path, boundary_idx, handle_idx):
         self.load_obj_mesh(mesh_path)
@@ -664,18 +686,21 @@ class Mesh_container():
             self.fn = self.fn - 1
         
     
-def main(resolution=512,
-        boundary_idx = [3, 13, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
-        # boundary_idx = [8, 21, 36, 51, 66, 81, 96, 111, 126, 141, 156, 171, 186, 201, 216, 231, 246, 261, 276, 291, 306, 321, 337, 352, 367, 382, 397, 412, 427, 442, 457, 472],
-        # handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
-        handle_idx   = [325],
-         ):
+def main(
+    # mesh_path = "data/sphere_trimesh.obj"
+    mesh_path = "data/sphere.obj",
+    resolution=512,
+    boundary_idx = [3, 13, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
+    # boundary_idx = [8, 21, 36, 51, 66, 81, 96, 111, 126, 141, 156, 171, 186, 201, 216, 231, 246, 261, 276, 291, 306, 321, 337, 352, 367, 382, 397, 412, 427, 442, 457, 472],
+    # handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
+    handle_idx   = [325],
+    ):
     ### sphere mesh
     # path                = "data/sphere_trimesh.obj"
-    path                = "data/sphere.obj"
+    # mesh_path                = "data/sphere.obj"
     
     ## for loading face and other stuff: vt, vn, ft, fn ...
-    mesh = Mesh_container(path, boundary_idx=boundary_idx, handle_idx=handle_idx)
+    mesh = Mesh_container(mesh_path, boundary_idx=boundary_idx, handle_idx=handle_idx)
     mask_v = mesh.mask_v
     image_path  = "checkerboard.png"
 
@@ -711,7 +736,7 @@ def render(mesh,
         start = time.time()
     
     v, f, vt, ft, vn = mesh.v, mesh.f, mesh.vt, mesh.ft, mesh.vn
-    
+    fn = mesh.fn
     if not glfw.init():
         return
 
@@ -730,15 +755,20 @@ def render(mesh,
 
     glfw.make_context_current(window)
 
-    new_vt = vt[ft].reshape(-1,2)
-    new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
+    # import pdb;pdb.set_trace()
     new_v  = v[f].reshape(-1, 3)
-    
-    # if f.max() == vn.shape[0]:
-    if True:
-        new_vn = vn[mesh.fn].reshape(-1, 3)
+    if len(vt) != 0:
+        new_vt = vt[ft].reshape(-1,2)
+        new_vt = np.concatenate((new_vt, np.zeros((new_vt.shape[0],1)) ), axis=1)
+        if len(fn) != 0:
+            new_vn = vn[fn].reshape(-1, 3)
+        else:
+            new_vn = vn[f].reshape(-1, 3)
     else:
+        new_vt = np.zeros_like(new_v)
+        vn = compute_vertex_normals(v, f)
         new_vn = vn[f].reshape(-1, 3)
+        
     quad = np.concatenate( (new_v, new_vt, new_vn), axis=1)
     quad = np.array(quad, dtype=np.float32)
 
@@ -1067,4 +1097,10 @@ def render(mesh,
     return a
 
 if __name__ == '__main__':
-    main(resolution=1024)
+    main(
+        resolution=1024,
+        # mesh_path = "data/sphere.obj",
+        mesh_path = "data/decimated_knight.obj",
+        boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
+        handle_idx=[324],
+    )

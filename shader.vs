@@ -38,6 +38,10 @@ void main()
 
     gl_Position = worldPosition; // world space
 
-    OutNormal = normal;
+
+    vec4 tempNormal = vec4(normal.x, normal.y, normal.z, 1.0f);
+    tempNormal = transform * tempNormal;
+    // OutNormal = normal;
+    OutNormal = tempNormal.xyz;
     OutCoord  = texcoord;
 }
