@@ -1101,6 +1101,8 @@ if __name__ == '__main__':
         resolution=1024,
         # mesh_path = "data/sphere.obj",
         mesh_path = "data/decimated_knight.obj",
+        # boundary_idx=[26, 56, 61, 79, 82, 90, 104, 124, 130, 179, 181, 190, 197, 198, 209, 247, 277, 354, 390, 391, 407, 417, 473],
+        # handle_idx=[144],
         boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
         handle_idx=[324],
     )
