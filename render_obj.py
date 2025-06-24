@@ -134,8 +134,8 @@ def main(mesh_file, image_path, resolution=1024, json_object=None):
     if f.max() == vn.shape[0]:
         new_vn = vn[mesh.fn].reshape(-1, 3)
     else:
-        fn = compute_face_norm(mesh.v, mesh.f)
-        vn = compute_vert_norm(torch.from_numpy(mesh.f).type(torch.int64), torch.from_numpy(fn)[None]).squeeze(0)
+        fn = compute_triangle_normals(mesh.v, mesh.f)
+        vn = get_vertex_normals_from_tri_normals(mesh.v, mesh.f, fn)
         vn = np.array(vn)
         new_vn = vn[mesh.f].reshape(-1, 3)
     # import pdb;pdb.set_trace()
@@ -143,8 +143,8 @@ def main(mesh_file, image_path, resolution=1024, json_object=None):
     quad = np.array(quad, dtype=np.float32)
 
     ############################################## shader ################
-    vertex_shader_source   = open('shader.vs', 'r').read()
-    fragment_shader_source = open('shader.fs', 'r').read()
+    vertex_shader_source   = open('shader/shader.vs', 'r').read()
+    fragment_shader_source = open('shader/shader.fs', 'r').read()
     
     vertex_shader   = shaders.compileShader(vertex_shader_source,   GL_VERTEX_SHADER)
     fragment_shader = shaders.compileShader(fragment_shader_source, GL_FRAGMENT_SHADER)

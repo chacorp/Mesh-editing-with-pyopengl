@@ -42,6 +42,10 @@ def mesh_standardization(
     return new_mesh
 
 class ICT_face_model():
+    """
+    Original code: https://github.com/USC-ICT/ICT-FaceKit
+    This is a quick loader version for personal interest    
+    """
     def __init__(self, 
                  face_only=False, 
                  narrow_only=False, 

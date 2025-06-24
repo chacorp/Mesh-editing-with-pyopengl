@@ -274,8 +274,8 @@ def main(resolution):
     quad = np.concatenate((bg_quad, quad), axis=0)
     
     ############################################## shader ################
-    vertex_shader_source   = open('shader2.vs', 'r').read()
-    fragment_shader_source = open('shader2.fs', 'r').read()
+    vertex_shader_source   = open('shader/shader2.vs', 'r').read()
+    fragment_shader_source = open('shader/shader2.fs', 'r').read()
     
     vertex_shader   = shaders.compileShader(vertex_shader_source,   GL_VERTEX_SHADER)
     fragment_shader = shaders.compileShader(fragment_shader_source, GL_FRAGMENT_SHADER)

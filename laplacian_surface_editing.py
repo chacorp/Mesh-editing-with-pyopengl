@@ -3,11 +3,8 @@ from __future__ import print_function
 import sys
 import os
 from os.path import exists, join
-# from glob import glob
 import numpy as np
 
-import scipy
-from scipy.sparse import diags
 
 import glfw
 from OpenGL.GL import *
@@ -20,8 +17,13 @@ import glm
 from imgui.integrations.glfw import GlfwRenderer
 import imgui
 
-import torch
-
+from utils.processing import laplacian_surface_editing
+from utils.loader import load_texture, Mesh_container
+from utils.util import (
+    x_rotation, 
+    y_rotation, 
+    z_rotation,
+)
 
 # ------------------------ Laplacian Matrices ------------------------ #
 # This file contains implementations of differentiable laplacian matrices.
@@ -30,395 +32,7 @@ import torch
 # 2) Cotangent Laplacian matrix
 # -------------------------------------------------------------------- #
 
-def laplacian_and_adjacency(verts_N: torch.Tensor, edges: torch.Tensor):
-    """
-    Reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/ops/laplacian_matrices.html
     
-    Computes the laplacian matrix.
-    The definition of the laplacian is
-    L[i, j] =    -1       , if i == j
-    L[i, j] = 1 / deg(i)  , if (i, j) is an edge
-    L[i, j] =    0        , otherwise
-    where deg(i) is the degree of the i-th vertex in the graph.
-
-    Args:
-        verts_N: number of vertices (N) of the mesh (N, 3)
-        edges:   tensor of shape (E, 2) containing the vertex indices of each edge
-    Returns:
-        L: Sparse FloatTensor of shape (V, V)
-        A: Adjacency matrix (V, V)
-    """
-    V = verts_N
-    E = edges.numpy()
-    
-    idx01 = np.stack([E[:,0], E[:,1]], axis=1)  # (E, 2)
-    idx10 = np.stack([E[:,1], E[:,0]], axis=1)  # (E, 2)
-    idx = np.r_[idx01, idx10].T  # (2, 2*E)
-    
-    ones = np.ones(idx.shape[1])
-    A  = scipy.sparse.csr_matrix((ones, idx), shape=(V, V))
-    
-    degree = np.asarray(A.sum(axis=1)).squeeze()
-    I_ = scipy.sparse.identity(V)
-    D_ = diags(1/degree) @ A
-    L = I_ - D_
-    
-    return L, A
-
-def laplacian_matrix_ring(mesh):
-    """
-    Reference: 
-        - Laplacian Surface Editing, Olga Sorkine, Daniel Cohen-Or, 2004
-        - https://github.com/luost26/laplacian-surface-editing/blob/master/main.py
-
-    Args:
-        mesh (class): contains the mesh properties
-
-    Returns:
-        LS (np.array): Laplacian matrix with ring coordinates
-    """
-    V = mesh.v
-    N = mesh.v.shape[0]
-    
-    # laplacian matrix
-    L = mesh.L.todense()
-    
-    # laplacian coordinates :: Delta = L @ V
-    delta = mesh.delta
-    # delta = np.concatenate([mesh.delta, np.ones([N, 1])], axis=-1)
-    # delta = mesh.L @ np.concatenate([mesh.v, np.ones([N, 1])], axis=-1)
-    
-    # print(L.shape)
-    # print(3*N)
-    LS = np.zeros([3*N, 3*N])
-    LS[0*N:1*N, 0*N:1*N] = -1*L
-    LS[1*N:2*N, 1*N:2*N] = -1*L
-    LS[2*N:3*N, 2*N:3*N] = -1*L
-    
-    # compute the l
-    for i in range(N):
-        ring        = np.array([i] + mesh.ring_indices[i])
-        n_ring      = len(ring)
-        V_ring      = V[ring]
-        
-        Ai          = np.zeros([n_ring * 3, 7])
-        zer0_ring   = np.zeros(n_ring)
-        ones_ring   = np.ones(n_ring)
-        
-        
-        Ai[:n_ring,        ] = np.stack([V_ring[:,0],    zer0_ring,  V_ring[:,2], -V_ring[:,1], ones_ring, zer0_ring, zer0_ring], axis=1)
-        Ai[n_ring:2*n_ring,] = np.stack([V_ring[:,1], -V_ring[:,2],    zer0_ring,  V_ring[:,0], zer0_ring, ones_ring, zer0_ring], axis=1)
-        Ai[2*n_ring:,      ] = np.stack([V_ring[:,2],  V_ring[:,1], -V_ring[:,0],    zer0_ring, zer0_ring, zer0_ring, ones_ring], axis=1)
-                
-        # Moore-Penrose Inversion
-        AiTAi_pinv = np.linalg.pinv(Ai.T @ Ai)
-        Ai_pinv = AiTAi_pinv @ Ai.T
-        
-        si = Ai_pinv[0]
-        hi = Ai_pinv[1:4]
-        # ti = Ai_pinv[4:7]
-        
-        Ti = np.array([
-            # [     si,  -hi[2],  hi[1], zer0_3],
-            # [  hi[2],      si, -hi[0], zer0_3],
-            # [ -hi[1],   hi[0],     si, zer0_3],
-            
-            # [    si,  -hi[2],  hi[1], ones_3],
-            # [  hi[2],     si,  -hi[0], ones_3],
-            # [ -hi[1],  hi[0],      si, ones_3],
-            
-            [     si, -hi[2],  hi[1],],
-            [  hi[2],     si, -hi[0],],
-            [ -hi[1],  hi[0],     si,],
-            
-            # [     si, -hi[2],  hi[1],  ti[0],],
-            # [  hi[2],     si, -hi[0],  ti[1],],
-            # [ -hi[1],  hi[0],     si,  ti[2],],
-            
-            # [     si,  hi[2], -hi[1],],
-            # [ -hi[2],     si,  hi[0],],
-            # [  hi[1], -hi[0],     si,],
-            # [ones_3,ones_3,ones_3,],
-            
-            # [     si,  hi[2], -hi[1],],
-            # [ -hi[2],     si,  hi[0],],
-            # [  hi[1], -hi[0],     si,],
-            # [  ti[0],  ti[1],  ti[2],],
-        ])
-        
-        # T_delta = (Ti @ delta[i])
-        T_delta =(Ti.transpose(2,0,1) @ delta[i].T).transpose(1,0)
-        # T_delta =(Ti.transpose(2,1,0) @ delta[i].T).transpose(1,0)
-        # T_delta = (delta[i].T @ Ti ).squeeze()
-        
-        disk_idxs = np.hstack([ring, ring+N, ring+2*N])
-        LS[i,     disk_idxs] += T_delta[0]
-        LS[i+N,   disk_idxs] += T_delta[1]
-        LS[i+2*N, disk_idxs] += T_delta[2]
-    
-    return LS
-
-def get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb=1.0):
-    N  = mesh.v.shape[0]
-    
-    len_H = len(handle_idx)
-    constraint_coef = np.zeros([3*N + 3*len_H, 3*N])
-    constraint_b    = np.zeros([3*N + 3*len_H])
-    
-    
-    i = 0
-    h = 0
-    
-    # Boundary constraints + outside ROI
-    for vidx, val in enumerate(mask): # num: N
-        idx_c = [i*3+0, i*3+1, i*3+2] # index of Boundary constraint
-        idx_v = [vidx, vidx+N, vidx+2*N] # index of v in V
-        
-        if val == 0:
-            constraint_coef[idx_c, idx_v] = 1.0 * Wb # one-hot
-            constraint_b[idx_c]           = mesh.v[vidx] * Wb # fixed position
-        i = i + 1
-        
-    # Handle constraints
-    for vidx in handle_idx: # num: len_H
-        idx_c = [i*3+0, i*3+1, i*3+2] # index of Handle constraint
-        idx_v = [vidx, vidx+N, vidx+2*N] # index of v in V
-        
-        constraint_coef[idx_c, idx_v] = 1.0 * Wb # one-hot
-        constraint_b[idx_c]           = handle_pos[h] * Wb
-        
-        i = i + 1
-        h = h + 1
-    return constraint_coef, constraint_b
-
-def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos, Wb=1.0):
-    """
-    Args:
-        mesh (class):        mesh properties
-        boundary_idx (list):    vertex indices of boundary
-        handle_idx (list):      vertex indices of handle
-        handle_pos (np.array):  displacement of handle
-        mask (np.array):  vertices outside boundary (V, 1)
-
-    Returns:
-        new_verts (np.array):   new vertices after laplacian surface editing
-    """
-    
-    N  = mesh.v.shape[0]
-    LS = mesh.LS
-    # ------------------- Add Constraints to the Linear System ------------------- #
-    constraint_coef, constraint_b = get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb)
-    # -------------------------- Solve the Linear System ------------------------- #
-    A        = np.vstack([LS,         constraint_coef])
-    b        = np.hstack([np.zeros(3*N), constraint_b])
-    # A        = LS
-    # b        = np.zeros(3*N)
-    spA      = scipy.sparse.coo_matrix(A)
-        
-    V_prime  = scipy.sparse.linalg.lsqr(spA, b)[0]
-    
-    new_verts = V_prime.reshape(3, -1).T
-    return new_verts
-
-def load_texture(path):
-    """
-    Args:
-        path (str): image path
-
-    Returns:
-        texture (int): texture id for the image
-    """
-    texture = glGenTextures(1)
-    print("texture buffer: ",texture)
-    glBindTexture(GL_TEXTURE_2D, texture)
-    image = Image.open(path)
-    image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).convert('RGB') # 'RGBA
-    image_data = np.array(list(image.getdata()), np.uint8)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.width, image.height, 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
-    glGenerateMipmap(GL_TEXTURE_2D)
-    glBindTexture(GL_TEXTURE_2D, texture)
-    return texture
-
-def rotation(M, angle, x, y, z):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    n = np.sqrt(x*x + y*y + z*z)
-    x,y,z = x/n, y/n, z/n
-    cx,cy,cz = (1-c)*x, (1-c)*y, (1-c)*z
-    R = np.array([[cx*x + c,   cy*x - z*s, cz*x + y*s, 0.0],
-                  [cx*y + z*s, cy*y + c,   cz*y - x*s, 0.0],
-                  [cx*z - y*s, cy*z + x*s, cz*z + c,   0.0],
-                  [0.0,        0.0,        0.0,        1.0]], dtype=M.dtype)
-
-    return np.dot(M, R.T)
-
-def y_rotation(angle):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[   c,       0.0,          s,        0.0],
-                  [ 0.0,       1.0,        0.0,        0.0],
-                  [  -s,       0.0,          c,        0.0],
-                  [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
-    return R
-
-def z_rotation(angle):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[   c,        -s,        0.0,        0.0],
-                  [   s,         c,        0.0,        0.0],
-                  [ 0.0,       0.0,        1.0,        0.0],
-                  [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
-    return R
-
-def x_rotation(angle):
-    angle = np.pi * angle / 180.0
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[ 1.0,       0.0,        0.0,        0.0],
-                  [ 0.0,         c,         -s,        0.0],
-                  [ 0.0,         s,          c,        0.0],
-                  [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
-    return R
-
-def normalize_np(V):
-    ### numpy
-    V = np.array(V)
-    V = (V-(V.max(0)+V.min(0))*0.5)/max(V.max(0)-V.min(0))
-    return V
-
-def normalize_torch(V):
-    ### torch
-    V = (V-(V.max(0).values + V.min(0).values) * 0.5)/max(V.max(0).values - V.min(0).values)
-    return V
-
-def recurr_adj(mask_v, adj_mat, idx, boundary_idx):
-    if mask_v[idx] == 1:
-        return
-    
-    mask_v[idx] = 1
-    for jdx in adj_mat[idx].indices:
-        if not jdx in boundary_idx:
-            recurr_adj(mask_v, adj_mat, jdx, boundary_idx)
-    return
-
-class Mesh_container():
-    def __init__(self, mesh_path, boundary_idx, handle_idx):
-        self.load_obj_mesh(mesh_path)
-        self.compute_edges()
-        
-        self.L, self.Adj    = laplacian_and_adjacency(self.v.shape[0], self.e)
-        self.delta          = self.L @ self.v
-        
-        self.ring_indices   = [self.Adj[i].indices.tolist() for i in range(self.v.shape[0])]
-        
-        self.mask_v = np.zeros([self.v.shape[0],1]).astype(int)
-        self.mask_v[boundary_idx] = 1
-        for h_idx in handle_idx:
-            recurr_adj(self.mask_v, self.Adj, h_idx, boundary_idx)
-        self.mask_v[boundary_idx] = 0
-        
-        ### laplacian surface editing
-        self.LS = laplacian_matrix_ring(self)
-    
-    def compute_edges(self):
-        """
-        Computes edges in packed form from the packed version of faces and verts.
-        reference: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/structures/meshes.html#Meshes.edges_packed
-        """
-        
-        faces = torch.tensor(self.f)
-        v0, v1, v2 = faces.chunk(3, dim=1)
-        e01 = torch.cat([v0, v1], dim=1)  # (sum(F_n), 2)
-        e12 = torch.cat([v1, v2], dim=1)  # (sum(F_n), 2)
-        e20 = torch.cat([v2, v0], dim=1)  # (sum(F_n), 2)
-
-        # All edges including duplicates.
-        edges = torch.cat([e12, e20, e01], dim=0)  # (sum(F_n)*3, 2)
-        
-        # rows in edges after sorting will be of the form (v0, v1) where v1 > v0.
-        edges, _ = edges.sort(dim=1)
-
-        # Remove duplicate edges: convert each edge (v0, v1) into an
-        # integer hash = V * v0 + v1; this is much faster than edges.unique(dim=1)
-        # After finding the unique elements reconstruct the vertex indices as:
-        # (v0, v1) = (hash / V, hash % V)
-        V = self.v.shape[0]
-        edges_hash = V * edges[:, 0] + edges[:, 1]
-        uqe, inverse_idxs = torch.unique(edges_hash, return_inverse=True)
-        
-        uqe_V = uqe.div(V, rounding_mode='floor')
-        self.e = torch.stack([uqe_V, uqe % V], dim=1)
-
-    def load_obj_mesh(self, mesh_path):
-        vertex_data = []
-        vertex_normal = []
-        vertex_texture = []
-        face_data = []
-        face_texture = []
-        face_normal = []
-        for line in open(mesh_path, "r"):
-            if line.startswith('#'):
-                continue
-            values = line.split()
-            if not values:
-                continue
-            if values[0] == 'v':
-                v = list(map(float, values[1:]))
-                vertex_data.append(v)
-            if values[0] == 'vn':
-                vn = list(map(float, values[1:]))
-                vertex_normal.append(vn)
-            if values[0] == 'vt':
-                vt = list(map(float, values[1:]))
-                vertex_texture.append(vt)
-            if values[0] == 'f':
-                f = list(map(lambda x: int(x.split('/')[0]),  values[1:]))
-                face_data.append(f)
-                if len(values[1].split('/')) >=2:
-                    ft = list(map(lambda x: int(x.split('/')[1]),  values[1:]))
-                    face_texture.append(ft)
-                if len(values[1].split('/')) >=3:
-                    ft = list(map(lambda x: int(x.split('/')[2]),  values[1:]))
-                    face_normal.append(ft)
-        
-        self.v  = normalize_np(
-            np.array(vertex_data)
-        )
-        self.vn = np.array(vertex_normal)
-        self.vt = np.array(vertex_texture)
-        self.f  = np.array(face_data)
-        self.ft = np.array(face_texture)
-        self.fn = np.array(face_normal)
-        if self.f.min() > 0:
-            self.f  = self.f  - 1
-            self.ft = self.ft - 1
-            self.fn = self.fn - 1
-        
-    
-def main(resolution=512,
-        boundary_idx = [3, 13, 481, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
-        handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
-         ):
-    ### sphere mesh
-    # path                = "data/sphere_trimesh.obj"
-    path                = "data/sphere.obj"
-    
-    ## for loading face and other stuff: vt, vn, ft, fn ...
-    mesh = Mesh_container(path, boundary_idx=boundary_idx, handle_idx=handle_idx)
-    mask_v = mesh.mask_v
-    image_path  = "checkerboard.png"
-
-    rendered    = render(mesh, resolution, image_path, boundary_idx=boundary_idx, handle_idx=handle_idx, mask_v=mask_v)
-    rendered    = rendered[::-1, :, :]
-    
-    # make directory
-    savefolder  = join('LSE')
-    if not exists(savefolder):
-        os.makedirs(savefolder)
-    
-    savefile    = join(savefolder, 'experiemtn.png')
-
-    Image.fromarray(rendered).save(savefile)
-    return
  
 def render(mesh, 
          resolution, 
@@ -471,8 +85,8 @@ def render(mesh,
     quad = np.array(quad, dtype=np.float32)
 
     ############################################## shader ################
-    vertex_shader_source   = open('shader.vs', 'r').read()
-    fragment_shader_source = open('shader.fs', 'r').read()
+    vertex_shader_source   = open('shader/shader.vs', 'r').read()
+    fragment_shader_source = open('shader/shader.fs', 'r').read()
     
     vertex_shader   = shaders.compileShader(vertex_shader_source,   GL_VERTEX_SHADER)
     fragment_shader = shaders.compileShader(fragment_shader_source, GL_FRAGMENT_SHADER)
@@ -771,6 +385,32 @@ def render(mesh,
     ################################################## imgui end ############
     glfw.terminate()
     return a
+
+def main(resolution=512,
+        boundary_idx = [3, 13, 481, 28, 43, 58, 73, 88, 103, 118, 133, 148, 163, 178, 193, 208, 223, 238, 253, 268, 283, 298, 313, 329, 344, 359, 374, 389, 404, 419, 434, 449, 464],
+        handle_idx   = [0, 10, 25, 40, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 250, 265, 280, 295, 310, 325, 326, 341, 356, 371, 386, 401, 416, 431, 446, 461],
+         ):
+    ### sphere mesh
+    # path                = "data/sphere_trimesh.obj"
+    path                = "data/sphere.obj"
+    
+    ## for loading face and other stuff: vt, vn, ft, fn ...
+    mesh = Mesh_container(path, boundary_idx=boundary_idx, handle_idx=handle_idx)
+    mask_v = mesh.mask_v
+    image_path  = "checkerboard.png"
+
+    rendered    = render(mesh, resolution, image_path, boundary_idx=boundary_idx, handle_idx=handle_idx, mask_v=mask_v)
+    rendered    = rendered[::-1, :, :]
+    
+    # make directory
+    savefolder  = join('LSE')
+    if not exists(savefolder):
+        os.makedirs(savefolder)
+    
+    savefile = join(savefolder, 'experiemtn.png')
+
+    Image.fromarray(rendered).save(savefile)
+    return
 
 if __name__ == '__main__':
     main(resolution=1024)

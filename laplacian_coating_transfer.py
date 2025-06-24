@@ -461,8 +461,8 @@ def render(mesh,
     quad = np.array(quad, dtype=np.float32)
 
     ############################################## shader ################
-    vertex_shader_source   = open('shader.vs', 'r').read()
-    fragment_shader_source = open('shader.fs', 'r').read()
+    vertex_shader_source   = open('shader/shader.vs', 'r').read()
+    fragment_shader_source = open('shader/shader.fs', 'r').read()
     
     vertex_shader   = shaders.compileShader(vertex_shader_source,   GL_VERTEX_SHADER)
     fragment_shader = shaders.compileShader(fragment_shader_source, GL_FRAGMENT_SHADER)
