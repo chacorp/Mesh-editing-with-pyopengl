@@ -17,6 +17,12 @@ import torch
 import igl
 import trimesh
 
+"""
+Stacked all functions in one file... 
+NOTE! these are unsorted!!
+"""
+
+# rotations
 def rotation(M, angle, x, y, z):
     angle = np.pi * angle / 180.0
     c, s = np.cos(angle), np.sin(angle)
@@ -57,6 +63,13 @@ def x_rotation(angle):
                   [ 0.0,       0.0,        0.0,        1.0]], dtype=np.float32)
     return R
 
+# scaling
+def rescale(V1 ,V2):
+    """rescale V1 to V2"""
+    V1mean = (V1.max(0)+V1.min(0))*0.5
+    V2mean = (V2.max(0)+V2.min(0))*0.5
+    V = (V1-V1mean)/max(V1.max(0)-V1.min(0)) * max(V2.max(0)-V2.min(0)) + V2mean
+    return V
 
 def normalize_v(V, mode='np'):
     if mode == 'np':
@@ -146,13 +159,6 @@ def get_triangle_basis(V,F):
     # returns [V2-V1, V3-V1, V4-V1]
     return np.stack([E1, E2, Vn], axis=1).transpose(0,2,1)
 
-def rescale(V1 ,V2):
-    """rescale V1 to V2"""
-    V1mean = (V1.max(0)+V1.min(0))*0.5
-    V2mean = (V2.max(0)+V2.min(0))*0.5
-    V = (V1-V1mean)/max(V1.max(0)-V1.min(0)) * max(V2.max(0)-V2.min(0)) + V2mean
-    return V
-
 # def build_vertex_adjacency(F):
 #     adj = defaultdict(set)
 #     for tri in F:
@@ -178,7 +184,45 @@ def rescale(V1 ,V2):
 #                         adj[i].append(j)
 #     return adj
 
-def fast_get_adj_triangle(F):
+
+# def look_triangle_has_v(vtx_idx, tri_idx, F):
+#     holds = []
+#     for idx, triangle in enumerate(F[:tri_idx]):
+#         for vidx in triangle:
+#             if vtx_idx == vidx:
+#                 holds.append(idx)
+                
+#     for idx, triangle in enumerate(F[tri_idx+1:]):
+#         for vidx in triangle:
+#             if vtx_idx == vidx:
+#                 holds.append(idx+tri_idx+1)
+#     return holds
+
+# def get_adj_triangle_mat(F):
+#     mat = np.zeros([len(F), len(F)])
+
+#     for i in range(len(F)):
+#         js=[]
+#         for vidx in F[i]:
+#             j_list = look_triangle_has_v(vidx, i, F)
+#             js += j_list
+#         js = list(set(js))
+#         mat[i,i] = len(js)
+#         mat[i, js] = -1
+#     return mat
+    
+# def get_adj_triangle(F):
+#     mat = []
+#     for i in range(len(F)):
+#         js=[]
+#         for vidx in F[i]:
+#             j_list = look_triangle_has_v(vidx, i, F)
+#             js += j_list
+#         js = list(set(js))
+#         mat.append(js)
+#     return mat
+
+def get_adj_triangle_list(F):
     """
     Return a list of adjacent triangle indices per triangle.
     F: (T,3) array of triangle indices.
@@ -390,7 +434,7 @@ def creat_A_csr_matrix_34_adj_triangle_small(V, F, INV_MAT, W=1.0, return_RHS=Fa
     T = F.shape[0]
     N = V.shape[0]
 
-    adj_list = fast_get_adj_triangle(F)
+    adj_list = get_adj_triangle_list(F)
 
     INV_MAT = INV_MAT.transpose(0,2,1)
     COEFF = np.concatenate((
@@ -442,7 +486,7 @@ def creat_A_csr_matrix_34_adj_triangle(V, F, INV_MAT, W=1.0, return_RHS=False):
     T = F.shape[0]
     N = V.shape[0]
 
-    adj_list = fast_get_adj_triangle(F)
+    adj_list = get_adj_triangle_list(F)
 
     INV_MAT = INV_MAT.transpose(0,2,1)
     COEFF = np.concatenate((
@@ -478,43 +522,6 @@ def creat_A_csr_matrix_34_adj_triangle(V, F, INV_MAT, W=1.0, return_RHS=False):
         RHS = np.zeros((3 * R_ * T,)) * W
         return MAT, RHS
     return MAT
-
-def look_triangle_has_v(vtx_idx, tri_idx, F):
-    holds = []
-    for idx, triangle in enumerate(F[:tri_idx]):
-        for vidx in triangle:
-            if vtx_idx == vidx:
-                holds.append(idx)
-                
-    for idx, triangle in enumerate(F[tri_idx+1:]):
-        for vidx in triangle:
-            if vtx_idx == vidx:
-                holds.append(idx+tri_idx+1)
-    return holds
-
-def get_adj_triangle_mat(F):
-    mat = np.zeros([len(F), len(F)])
-
-    for i in range(len(F)):
-        js=[]
-        for vidx in F[i]:
-            j_list = look_triangle_has_v(vidx, i, F)
-            js += j_list
-        js = list(set(js))
-        mat[i,i] = len(js)
-        mat[i, js] = -1
-    return mat
-    
-def get_adj_triangle(F):
-    mat = []
-    for i in range(len(F)):
-        js=[]
-        for vidx in F[i]:
-            j_list = look_triangle_has_v(vidx, i, F)
-            js += j_list
-        js = list(set(js))
-        mat.append(js)
-    return mat
 
 
 
@@ -570,7 +577,176 @@ def find_closest_valid_points(V_src, F_src, V_tar, F_tar, normal_weight=0.5, k=1
 
     return closest_points
 
-def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc=0, Wm=1.0, show=False):
+def find_closest_valid_points_normal_first(V_src, F_src, V_tar, F_tar, normal_weight=0.5, k=10):
+    """
+    For each source vertex, find the closest valid point on the target mesh,
+    prioritizing normal similarity first, then distance.
+    
+    Args:
+        V_src: (N,3) source vertices
+        F_src: (T1,3) source triangles
+        V_tar: (M,3) target vertices
+        F_tar: (T2,3) target triangles
+        normal_weight: (0~1) balance between distance and normal alignment (used in final ranking)
+        k: number of top normal-matching triangles to consider
+
+    Returns:
+        closest_points: (N,3) closest valid points on target mesh
+    """
+    N = V_src.shape[0]
+    src_normals = compute_vertex_normals(V_src, F_src)      # (N,3)
+    tri_centers = compute_triangle_centers(V_tar, F_tar)    # (T,3)
+    tri_normals = compute_triangle_normals(V_tar, F_tar)    # (T,3)
+
+    closest_points = np.zeros((N, 3))
+    for i in range(N):
+        v = V_src[i]
+        n = src_normals[i]
+
+        # similar normal direction
+        dots = tri_normals @ n
+        valid = np.where(dots >= 0)[0]
+        # if len(valid) == 0:
+        #     closest_points[i] = v
+        #     continue
+
+        topk_idx = valid[np.argsort(-dots[valid])[:k]]
+        best_score = np.inf
+        best_point = v  # fallback
+
+        for j in topk_idx:
+            tri = V_tar[F_tar[j]]
+            t_n = tri_normals[j]
+            proj = project_point_to_triangle(v, tri)
+            dist = np.linalg.norm(v - proj)
+            normal_sim = 1.0 - np.dot(n, t_n)
+            score = (1 - normal_weight) * dist + normal_weight * normal_sim
+
+            if score < best_score:
+                best_score = score
+                best_point = proj
+
+        closest_points[i] = best_point
+
+    return closest_points
+
+
+def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_weight=0.5, k=5, is_mat=False):
+    """
+    Return closest valid points on the target mesh for each source vertex.
+    
+    Args:
+        V_src: (N,3) source vertices
+        F_src: (N,3) source triangles
+        V_tar: (M,3) target vertices
+        F_tar: (T,3) target triangles
+        val_tar: (M, C) target per vertex feature
+        normal_weight: how much weight to give to normal similarity (0~1)
+    """
+    if val_tar is None:
+        val_tar = V_src
+        
+    N_src, N_src_fn = calc_norm_trimesh(V_src, F_src)
+    #print()
+    N = V_src.shape[0]
+    tri_centers = compute_triangle_centers(V_tar, F_tar)    # (T,3)
+    tri_normals = compute_triangle_normals(V_tar, F_tar)    # (T,3)
+
+    tree = cKDTree(tri_centers)  # Efficient nearest triangle lookup
+
+    if is_mat:
+        closest_points = np.zeros((V_src.shape[0], 3, 3))
+    else:
+        closest_points = np.zeros_like(V_src)
+
+    for i in range(N):
+        v_src = V_src[i]
+        n_src = N_src[i]
+
+        # 1. Query k nearest triangle centers
+        dists, idxs = tree.query(v_src, k=k)  # k-nearest triangle centers
+        best_score = float('inf')
+        # best_point = None
+        best_tri = None
+
+        for j, dist in zip(idxs, dists):
+            # tri = V_tar[F_tar[j]]
+            tri = F_tar[j]
+            tri_normal = tri_normals[j]
+
+            # Normal similarity (1 - cosine)
+            normal_sim = 1 - np.dot(n_src, tri_normal)
+
+            # Combined score (smaller the better)
+            score = (1 - normal_weight) * dist + normal_weight * normal_sim
+
+            if score < best_score:
+                best_score = score
+                # best_point = proj
+                best_tri = tri
+
+        # closest_points[i] = best_point
+        u,v,w = project_point_to_triangle(v_src, V_tar[best_tri], return_weight=True)
+        val_tri = val_tar[best_tri]
+        # print(val_tri.shape)
+        if is_mat: # val_tar : Mx3x3
+            closest_value = blend_rotation_quaternions_dq(val_tri, (u,v,w))
+        else: # val_tar Mx3
+            closest_value = u*val_tri[0] + v*val_tri[1] + w*val_tri[2]
+        closest_points[i] = closest_value
+
+    return closest_points
+
+def find_closest_valid_feature_normal_first(V_src, F_src, V_tar, F_tar,
+                                            val_tar=None, normal_weight=0.5, k=5, is_mat=False):
+    if val_tar is None:
+        val_tar = V_src.copy().astype(np.float64)
+
+    src_normals = compute_vertex_normals(V_src, F_src)
+    # src_normals, _ = calc_norm_trimesh(V_src, F_src)
+    tri_centers = compute_triangle_centers(V_tar, F_tar)
+    tri_normals = compute_triangle_normals(V_tar, F_tar)
+
+    nearest_idxs = []
+    bary_weights = []
+
+    # No need for KD-tree on centers since we filter by normals first
+    for i, v in enumerate(V_src.astype(np.float64)):
+        n_src = src_normals[i]
+        # dot with all target normals
+        dots = tri_normals @ n_src
+        valid = np.where(dots > 0)[0]
+        
+        if valid.size == 0:
+            nearest_idxs.append(-1)
+            bary_weights.append(np.zeros(3, dtype=np.float64))
+            continue
+            
+        # find closest among valid centers
+        centers_valid = tri_centers[valid]
+        dists = np.linalg.norm(centers_valid - v, axis=1)
+        best = valid[np.argmin(dists)]
+        _, bc = project_point_to_triangle(v, V_tar[F_tar[best]], return_weight=True)
+        nearest_idxs.append(best)
+        bary_weights.append(bc)
+
+    return np.array(nearest_idxs, dtype=int), np.vstack(bary_weights)
+
+def compute_geodesic_distance_matrix(V, F):
+    N = V.shape[0]
+    I, J = F[:, [0,1,2]], F[:, [1,2,0]]
+    edges = np.concatenate([I.reshape(-1,1), J.reshape(-1,1)], axis=1)
+    edges = np.unique(np.sort(edges, axis=1), axis=0)
+
+    vi, vj = edges[:,0], edges[:,1]
+    edge_len = np.linalg.norm(V[vi] - V[vj], axis=1)
+    W = scipy.sparse.coo_matrix((edge_len, (vi, vj)), shape=(N,N))
+    W = W + W.T
+    dist_matrix = csgraph.dijkstra(W, directed=False)
+    return dist_matrix
+
+
+def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc=0, Wm=1.0, show=False, mode=1):
     N = len(src_mesh.v)
     T = len(src_mesh.f)
     
@@ -613,7 +789,10 @@ def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc
 
         # cloest valid point
         if Wc > 0:
-            closest_pts0 = find_closest_valid_points(V_src=src_def_mesh.v, F_src=src_def_mesh.f, V_tar=tgt_mesh.v, F_tar=tgt_mesh.f, normal_weight=0.1, k=5)
+            if mode==1:
+                closest_pts0 = find_closest_valid_points(V_src=src_def_mesh.v, F_src=src_def_mesh.f, V_tar=tgt_mesh.v, F_tar=tgt_mesh.f, normal_weight=0.1, k=5)
+            elif mode == 2:
+                closest_pts0 = find_closest_valid_points_normal_first(V_src=src_def_mesh.v, F_src=src_def_mesh.f, V_tar=tgt_mesh.v, F_tar=tgt_mesh.f, normal_weight=0.1, k=5)
             # A_c, RHS_c = creat_A_csr_matrix_34_marker_small(src_mesh.v, src_mesh.f, src_m, tgt_m, closest_pts0, W=Wc, return_RHS=True)
             A_c, RHS_c = creat_A_csr_matrix_34_marker_small(src_def_mesh.v, src_def_mesh.f, torch.arange(N), torch.arange(N), closest_pts0, W=Wc, return_RHS=True)
             A_list.append(A_c)
@@ -738,6 +917,7 @@ def get_TBN_foreach_vertex(V, F):
             [Nx, Ny, Nz],
         ]
     """
+    # normal
     Vn = compute_vertex_normals(V, F)
     
     al = igl.adjacency_list(F) # all neighbors
@@ -748,10 +928,12 @@ def get_TBN_foreach_vertex(V, F):
 
     # project
     _Vt = np.sum(Vt_nb * Vn, axis=1, keepdims=True)
-        
+    
+    # tangent
     Vt = Vt_nb - (_Vt * Vn)
     Vt = Vt/(np.linalg.norm(Vt, axis=1, keepdims=True)+1e-8)
     
+    # bitangent
     Vb = np.cross(Vn, Vt)
     Vb = Vb/(np.linalg.norm(Vb, axis=1, keepdims=True)+1e-8)
     
@@ -850,6 +1032,8 @@ def mesh_smooth(V, F, values, tau=0.001):
     s = m - tau * l
     return spsolve(s, m @ values)
 
+
+# playing with rotation representation
 def random_rotation_matrix(randgen=None):
     """
     Borrowed from https://github.com/nmwsharp/diffusion-net/blob/master/src/diffusion_net/utils.py
@@ -1013,6 +1197,8 @@ def from_6D_to_rotation_matrix_torch(in_6d, eps=1e-12):
     return torch.stack((b1, b2, b3), dim=-2)
 
 
+# using torch
+@torch.no_grad()
 def rodrigues_rotation_matrix_torch(rotvec):
     """
     rotvec: (B, 3) rotation vectors
@@ -1032,7 +1218,7 @@ def rodrigues_rotation_matrix_torch(rotvec):
     theta = theta.unsqueeze(-1)  # (B, 1, 1)
     R = I + torch.sin(theta) * K + (1 - torch.cos(theta)) * (K @ K)
     return R
-    
+
 @torch.no_grad()
 def rotation_matrix_from_vectors_batch_fast(v1s, v2s, eps=1e-12):
     """
@@ -1138,125 +1324,8 @@ def blend_rotation_quaternions_dq(tri_mat, weights):
     # Convert to rotation matrix
     return R.from_quat(quat_blend).as_matrix()
 
-def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_weight=0.5, k=5, is_mat=False):
-    """
-    Return closest valid points on the target mesh for each source vertex.
-    
-    Args:
-        V_src: (N,3) source vertices
-        F_src: (N,3) source triangles
-        V_tar: (M,3) target vertices
-        F_tar: (T,3) target triangles
-        val_tar: (M, C) target per vertex feature
-        normal_weight: how much weight to give to normal similarity (0~1)
-    """
-    if val_tar is None:
-        val_tar = V_src
-        
-    N_src, N_src_fn = calc_norm_trimesh(V_src, F_src)
-    #print()
-    N = V_src.shape[0]
-    tri_centers = compute_triangle_centers(V_tar, F_tar)    # (T,3)
-    tri_normals = compute_triangle_normals(V_tar, F_tar)    # (T,3)
 
-    tree = cKDTree(tri_centers)  # Efficient nearest triangle lookup
-
-    if is_mat:
-        closest_points = np.zeros((V_src.shape[0], 3, 3))
-    else:
-        closest_points = np.zeros_like(V_src)
-
-    for i in range(N):
-        v_src = V_src[i]
-        n_src = N_src[i]
-
-        # 1. Query k nearest triangle centers
-        dists, idxs = tree.query(v_src, k=k)  # k-nearest triangle centers
-        best_score = float('inf')
-        # best_point = None
-        best_tri = None
-
-        for j, dist in zip(idxs, dists):
-            # tri = V_tar[F_tar[j]]
-            tri = F_tar[j]
-            tri_normal = tri_normals[j]
-
-            # Normal similarity (1 - cosine)
-            normal_sim = 1 - np.dot(n_src, tri_normal)
-
-            # Combined score (smaller the better)
-            score = (1 - normal_weight) * dist + normal_weight * normal_sim
-
-            if score < best_score:
-                best_score = score
-                # best_point = proj
-                best_tri = tri
-
-        # closest_points[i] = best_point
-        u,v,w = project_point_to_triangle(v_src, V_tar[best_tri], return_weight=True)
-        val_tri = val_tar[best_tri]
-        # print(val_tri.shape)
-        if is_mat: # val_tar : Mx3x3
-            closest_value = blend_rotation_quaternions_dq(val_tri, (u,v,w))
-        else: # val_tar Mx3
-            closest_value = u*val_tri[0] + v*val_tri[1] + w*val_tri[2]
-        closest_points[i] = closest_value
-
-    return closest_points
-
-    
-def find_closest_valid_feature_normal_first(V_src, F_src, V_tar, F_tar,
-                                            val_tar=None, normal_weight=0.5, k=5, is_mat=False):
-    if val_tar is None:
-        val_tar = V_src.copy().astype(np.float64)
-
-    src_normals = compute_vertex_normals(V_src, F_src)
-    # src_normals, _ = calc_norm_trimesh(V_src, F_src)
-    tri_centers = compute_triangle_centers(V_tar, F_tar)
-    tri_normals = compute_triangle_normals(V_tar, F_tar)
-
-    nearest_idxs = []
-    bary_weights = []
-
-    # No need for KD-tree on centers since we filter by normals first
-    for i, v in enumerate(V_src.astype(np.float64)):
-        n_src = src_normals[i]
-        # dot with all target normals
-        dots = tri_normals @ n_src
-        valid = np.where(dots > 0)[0]
-        
-        if valid.size == 0:
-            nearest_idxs.append(-1)
-            bary_weights.append(np.zeros(3, dtype=np.float64))
-            continue
-            
-        # find closest among valid centers
-        centers_valid = tri_centers[valid]
-        dists = np.linalg.norm(centers_valid - v, axis=1)
-        best = valid[np.argmin(dists)]
-        _, bc = project_point_to_triangle(v, V_tar[F_tar[best]], return_weight=True)
-        nearest_idxs.append(best)
-        bary_weights.append(bc)
-
-    return np.array(nearest_idxs, dtype=int), np.vstack(bary_weights)
-
-
-def compute_geodesic_distance_matrix(V, F):
-    N = V.shape[0]
-    I, J = F[:, [0,1,2]], F[:, [1,2,0]]
-    edges = np.concatenate([I.reshape(-1,1), J.reshape(-1,1)], axis=1)
-    edges = np.unique(np.sort(edges, axis=1), axis=0)
-
-    vi, vj = edges[:,0], edges[:,1]
-    edge_len = np.linalg.norm(V[vi] - V[vj], axis=1)
-    W = scipy.sparse.coo_matrix((edge_len, (vi, vj)), shape=(N,N))
-    W = W + W.T
-    dist_matrix = csgraph.dijkstra(W, directed=False)
-    return dist_matrix
-
-
-
-
+# using torch
 def compute_face_norm(v, f):
     vf = v[f]
     e1 = vf[..., 0] - vf[..., 1]
@@ -1266,7 +1335,7 @@ def compute_face_norm(v, f):
     return norm
 
 def compute_vert_norm(faces, face_normals, num_vertices=None):
-    r"""Computes normals for every vertex by averaging face normals
+    """Computes normals for every vertex by averaging face normals
     assigned to that vertex for every face that has this vertex.
 
     Args:
@@ -1309,7 +1378,8 @@ def compute_vert_norm(faces, face_normals, num_vertices=None):
     vertex_normals = vertex_normals / counts
     return vertex_normals
 
-def computeTangentBasis(vertex, uv):
+# something wrong
+def _computeTangentBasis(vertex, uv):
     tangents = []
     tangents = np.zeros_like(vertex)
     # bitangents = []
@@ -1401,7 +1471,7 @@ def quaternion_to_rotation_matrix(q):
         return R[0]  # remove batch dim if input was (4,)
     return R
 
-
+# remeshings
 def decimate_mesh(mesh, target_faces):
     """decimate mesh
     Args:
@@ -1485,3 +1555,24 @@ def decimate_mesh_vertex(mesh, num_vertex, tolerance=2, verbose=False):
     if verbose:
         print('Output mesh has', mesh.vertices.shape[0], 'vertices and', mesh.faces.shape[0], 'faces')
     return mesh
+
+# for visualization
+def compute_face_gradient(V, F, f):
+    grads = np.zeros((F.shape[0], 3))
+    for i, face in enumerate(F):
+        v0, v1, v2 = V[face]
+        f0, f1, f2 = f[face]
+
+        e1 = v1 - v0
+        e2 = v2 - v0
+
+        normal = np.cross(e1, e2)
+        area = 0.5 * np.linalg.norm(normal)
+        normal /= (2 * area + 1e-8)
+
+        g = ((f1 - f0) * np.cross(normal, v2 - v0) +
+             (f2 - f0) * np.cross(v0 - v1, normal)) / (2 * area + 1e-8)
+
+        grads[i] = g
+
+    return grads

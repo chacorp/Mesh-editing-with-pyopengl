@@ -107,6 +107,7 @@ def get_rotation(mesh):
 
         # (3, N) x (N, N) x (N, 3)
         S_i = E_ring @ D_ring @ E_prime_ring.T
+        S_i /= abs(S_i).max()
         u_i, _, vt_i = np.linalg.svd(S_i)
         
         R_i = vt_i.T @ u_i.T
@@ -156,201 +157,6 @@ def laplacian_matrix_ring_ARAP(mesh):
 
     return LS
 
-def _laplacian_matrix_ring2(mesh):
-    """
-    Args:
-        mesh (class): contains the mesh properties
-
-    Returns:
-        LS (np.array): 3N x 3N Laplacian matrix with rotation matrix in ring coordinates
-    """
-    
-    N = mesh.v.shape[0]
-    
-    ## rotations
-    RS = np.zeros([N, 3, 3])
-    for i in range(N):
-        
-        ring = np.array(mesh.ring_indices[i])
-        disk = np.array([i] + mesh.ring_indices[i])
-        
-        wij = mesh.L[i, ring].data[1:]
-        # wij = mesh.L[i].data[1:]
-        D_ring = np.diag(wij)
-        
-        # import pdb;pdb.set_trace()
-        E_ring       = (mesh.v[i] - mesh.v[ring]).T # (3, N)
-        E_prime_ring = (mesh.v_prime[i] - mesh.v_prime[ring]).T # (3, N)
-        
-        # (3, N) x (N, N) x (N, 3)
-        S_i = E_ring @ D_ring @ E_prime_ring.T
-        # S_i = E_ring @ E_prime_ring.T
-        
-        u_i, s_i, vt_i = np.linalg.svd(S_i)
-        
-        R_i = vt_i.T @ u_i.T
-        
-        if np.linalg.det(R_i) < 0:
-            vt_i[-1, :] *= -1
-            R_i = vt_i.T @ u_i.T
-            
-        RS[i] = R_i
-        # RS[i] = np.eye(3)
-    
-        
-    # laplacian matrix for rhs
-    # LS = mesh.LS.copy()
-    LS = np.zeros([3*N, 3*N])
-    for i in range(N):
-        ring = np.array(mesh.ring_indices[i])
-        disk = np.array([i] + mesh.ring_indices[i])
-        n_ring = len(ring)
-        
-        
-        disk_idxs = np.hstack([disk, disk+N, disk+2*N])
-        ring_idxs = np.hstack([ring, ring+N, ring+2*N])
-        # i_idxs = np.hstack([i, i+N, i+2*N])
-        
-        # wij = 0.5 * mesh.LS[[i, i+N, i+2*N]][:, ring_idxs].reshape(3, 3, n_ring).transpose(2,0,1) # (Nj, 3,3)
-        wij = 0.5 * mesh.L[i, ring].data[:,None,None] # (Nj, 1,1)
-        # print(wij.shape)
-        
-        # wij/2 * (Ri + Rj) (pi - pj)
-        wij_Ri_Rj = wij * (RS[i][None] + RS[ring])
-        
-        wij_Ri = wij_Ri_Rj.sum(0)
-        wij_Ri_Rj_all = np.vstack([-wij_Ri[None], wij_Ri_Rj])
-        
-        wij_Ri_Rj_all_t = wij_Ri_Rj_all.transpose(1,2,0) # (disk, 3, 3) | disk:{i, j0, j1, j2,...jn}
-        
-        LS[i,     disk_idxs] += wij_Ri_Rj_all_t[0].reshape(-1)
-        LS[i+N,   disk_idxs] += wij_Ri_Rj_all_t[1].reshape(-1)
-        LS[i+2*N, disk_idxs] += wij_Ri_Rj_all_t[2].reshape(-1)
-        
-    return LS
-
-def _laplacian_matrix_ring(mesh):
-    """
-    Args:
-        mesh (class): contains the mesh properties
-
-    Returns:
-        LS (np.array): Laplacian matrix with ring coordinates
-    """
-    
-    N = mesh.v.shape[0]
-    
-    ## rotations
-    RS = np.zeros([N, 3, 3])
-    for i in range(N):
-        
-        ring = np.array(mesh.ring_indices[i])
-        disk = np.array([i] + mesh.ring_indices[i])
-        
-        wij = mesh.L[i].data[1:]
-        D_ring = np.diag(wij)
-        
-        import pdb;pdb.set_trace()
-        E_ring       = (mesh.v[i] - mesh.v[ring]).T # (3, N)
-        E_prime_ring = (mesh.v_prime[i] - mesh.v_prime[ring]).T # (3, N)
-        
-        # (3, N) x (N, N) x (N, 3)
-        # S_i = E_ring @ D_ring @ E_prime_ring.T
-        S_i = E_ring @ E_prime_ring.T
-        
-        u_i, s_i, vt_i = np.linalg.svd(S_i)
-        
-        R_i = vt_i.T @ u_i.T
-        
-        if np.linalg.det(R_i) < 0:
-            vt_i[-1, :] *= -1
-            R_i = vt_i.T @ u_i.T
-            
-        RS[i] = R_i
-        # RS[i] = np.eye(3)
-    
-        
-    # laplacian matrix for rhs
-    # LS = mesh.LS.copy()
-    LS = np.zeros([3*N, 3*N])
-    for i in range(N):
-        ring = np.array(mesh.ring_indices[i])
-        disk = np.array([i] + mesh.ring_indices[i])
-        n_ring = len(ring)
-        # Ri(pi - pj)
-        # LS[[i, i+N, i+2*N]][:, rind_idxs] += R_ring.repeat(n_ring, 1)
-        
-        # wij/2 * (Ri + Rj)(pi - pj)
-        disk_idxs = np.hstack([disk, disk+N, disk+2*N])
-        ring_idxs = np.hstack([ring, ring+N, ring+2*N])
-        i_idxs = np.hstack([i, i+N, i+2*N])
-        
-        # LS[[i, i+N, i+2*N]][:, i_idxs] += RS[i] * mesh.LS[[i, i+N, i+2*N]][:, i_idxs] * 0.5
-        
-        # wii = -0.5 * mesh.LS[[i, i+N, i+2*N]][:, i_idxs] # multiply -1 because it is already negative! (-wii == wij)
-        # wij = 0.5 *mesh.LS[[i, i+N, i+2*N]][:, ring_idxs].reshape(3, 3, n_ring).transpose(2,0,1)
-        # wii = -0.5 * mesh.L[i,i]
-        wij = 0.5 * mesh.L[i, ring].data[:,None,None]
-        
-        # wij_Rj = (mesh.L[i,ring].data[:,None,None] * RS[ring]).sum(0)
-        
-        # wii_Ri = wii * RS[i]
-        # wij_Rj = (wij * RS[ring]).sum(0)
-        
-        # wij_Ri = 0.5 * (wii_Ri + wij_Rj)
-        # wij_Ri = 0.5 * (wii * RS[i] + (wij * RS[ring]).sum(0))
-        
-        # wij_Ri_Rj = 0.5 * mesh.L[i, ring].data[:,None,None] * (RS[i][None] + RS[ring])
-        wij_Ri_Rj = wij * (RS[i][None] + RS[ring])
-        wij_Ri = wij_Ri_Rj.sum(0)
-        wij_Ri_Rj_all = np.vstack([-wij_Ri[None], wij_Ri_Rj])
-        wij_Ri_Rj_all_t = wij_Ri_Rj_all.transpose(1,2,0) # (disk, 3, 3) | disk:{i, j0, j1, j2,...jn}
-        
-        LS[i,     disk_idxs] += wij_Ri_Rj_all_t[0].reshape(-1)
-        LS[i+N,   disk_idxs] += wij_Ri_Rj_all_t[1].reshape(-1)
-        LS[i+2*N, disk_idxs] += wij_Ri_Rj_all_t[2].reshape(-1)
-        
-        # LS[i,     i_idxs] += wij_Ri[0]
-        # LS[i+N,   i_idxs] += wij_Ri[1]
-        # LS[i+2*N, i_idxs] += wij_Ri[2]
-        
-        # # for j in range(n_ring):
-        # #     jdx = mesh.ring_indices[i][j]
-        # #     j_idxs = np.hstack([jdx, jdx+N, jdx+2*N])
-        # #     LS[i,     j_idxs] += wij_Ri_Rj[j,0]
-        # #     LS[i+N,   j_idxs] += wij_Ri_Rj[j,1]
-        # #     LS[i+2*N, j_idxs] += wij_Ri_Rj[j,2]
-        # import pdb;pdb.set_trace()
-        # wij_Ri_Rj_ = wij_Ri_Rj.transpose(1,2,0)
-        # LS[i,     ring_idxs] -= wij_Ri_Rj_[0].reshape(-1)
-        # LS[i+N,   ring_idxs] -= wij_Ri_Rj_[1].reshape(-1)
-        # LS[i+2*N, ring_idxs] -= wij_Ri_Rj_[2].reshape(-1)
-        
-        
-        
-        # LS[i,     i_idxs] += (RS[i, 0]*mesh.LS[i,     i_idxs] + (RS[ring, 0] * mesh.LS[i,     ring_idxs].reshape(n_ring,-1)).sum(0)) * 0.5
-        # LS[i+N,   i_idxs] += (RS[i, 1]*mesh.LS[i+N,   i_idxs] + (RS[ring, 1] * mesh.LS[i+N,   ring_idxs].reshape(n_ring,-1)).sum(0)) * 0.5
-        # LS[i+2*N, i_idxs] += (RS[i, 2]*mesh.LS[i+2*N, i_idxs] + (RS[ring, 2] * mesh.LS[i+2*N, ring_idxs].reshape(n_ring,-1)).sum(0)) * 0.5
-        
-        # # RS[ring, 0]
-        # # RS[ring].transpose(1,2,0).reshape(3, -1)
-        # # LS[[i, i+N, i+2*N]][:, ring_idxs] += RS[ring].transpose(1,2,0).reshape(3, -1) * mesh.LS[[i, i+N, i+2*N]][:, ring_idxs] * 0.5
-        
-        # LS[i,     ring_idxs] -= (RS[i, 0] + RS[ring, 0]).transpose(1,0).reshape(-1) * mesh.LS[i,     ring_idxs] * 0.5
-        # LS[i+N,   ring_idxs] -= (RS[i, 1] + RS[ring, 1]).transpose(1,0).reshape(-1) * mesh.LS[i+N,   ring_idxs] * 0.5
-        # LS[i+2*N, ring_idxs] -= (RS[i, 2] + RS[ring, 2]).transpose(1,0).reshape(-1) * mesh.LS[i+2*N, ring_idxs] * 0.5
-        
-        # LS[i,     ring_idxs] += R_ring[0]
-        # LS[i+N,   ring_idxs] += R_ring[1]
-        # LS[i+2*N, ring_idxs] += R_ring[2]
-    
-    # LS = LS * mesh.LS * 0.5
-    # LS[np.arange(N),np.arange(N)]=0
-    # import pdb;pdb.set_trace()
-    # L = mesh.L.todense()
-    
-    return LS
-
 def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos, Wb=1.0):
     """
     Args:
@@ -395,7 +201,7 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
     Returns:
         new_verts (np.array):   new vertices after laplacian surface editing
     """
-    mesh.v = mesh.orig_v
+    # mesh.v = mesh.orig_v
     N  = mesh.v.shape[0]
     
     # ------------------- Add Constraints to the Linear System ------------------- #
@@ -405,6 +211,7 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
     # -------------------------- Solve the Linear System ------------------------- #
     # A = np.vstack([mesh.L.todense()])
     # b = np.vstack([mesh.delta])
+    
     A = np.vstack([mesh.L.todense(), constraint_coef])
     b = np.vstack([mesh.delta,          constraint_b])
     # b = np.vstack([np.zeros((N,3)), constraint_b])
@@ -433,7 +240,8 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
                 
         v_prime = np.asarray(v_prime)
         mesh.v_prime = v_prime.copy()
-                
+    
+    mesh.v = mesh.v_prime
     return mesh.v_prime
 
 def get_constraints(mesh, mask, handle_idx, handle_pos, Wb=1.0):

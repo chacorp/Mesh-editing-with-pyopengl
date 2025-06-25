@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+import scipy.sparse
 
 def adjacency_matrix(verts_N, edges, return_idx=False):
     """
@@ -61,59 +62,54 @@ def laplacian_and_adjacency(verts_N, edges):
     return L, A
 
 def laplacian_cotangent(verts, faces, use_normed=True, eps=1e-12):
-    NV = verts.shape[0]
-    # NF = faces.shape[0]
-
-    face_verts = verts[faces]
-    v0, v1, v2 = face_verts[:, 0], face_verts[:, 1], face_verts[:, 2]
-
+    """
+    Returns
+    -------
+    L : scipy.sparse.csr_matrix
+        (V,V) cotangent Laplacian (normalized or unnormalized).
+    inv_areas : np.ndarray, shape (V,)
+        1 / (sum of adjacent face areas) for each vertex.
+    """
+    V = verts.shape[0]
+    F = faces.shape[0]
+    
+    fv = verts[faces]  # (F,3,3)
+    v0, v1, v2 = fv[:,0], fv[:,1], fv[:,2]
     A = np.linalg.norm(v1 - v2, axis=1)
     B = np.linalg.norm(v0 - v2, axis=1)
     C = np.linalg.norm(v0 - v1, axis=1)
-
+    
     s = 0.5 * (A + B + C)
-    area = np.sqrt(np.clip(s * (s - A) * (s - B) * (s - C), eps, np.inf))
-
-    A2, B2, C2 = A**2, B**2, C**2
+    area = np.sqrt(np.clip(s*(s-A)*(s-B)*(s-C), eps, np.inf))  # (F,)
+    
+    A2, B2, C2 = A*A, B*B, C*C
     cota = (B2 + C2 - A2) / area
     cotb = (A2 + C2 - B2) / area
     cotc = (A2 + B2 - C2) / area
-    cot = np.stack([cota, cotb, cotc], axis=1) / 4.0 # (F, 3)
-
-    ii = faces[:, [1, 2, 0]].reshape(-1)
-    jj = faces[:, [2, 0, 1]].reshape(-1)
-    L = scipy.sparse.csr_matrix((cot.reshape(-1), (ii, jj)), shape=(NV, NV))
-
-    # W = L
-    W = (L + L.T).tocsr()
-    deg = np.asarray(W.sum(axis=1)).squeeze()
+    cot = np.stack([cota, cotb, cotc], axis=1) / 4.0  # (F,3)
     
-    # # Inverse area per vertex
-    # inv_areas = np.zeros(NV, dtype=np.float64)
-    # val = np.repeat(area, 3)
+    ii = faces[:, [1,2,0]].reshape(-1)
+    jj = faces[:, [2,0,1]].reshape(-1)
+    
+    W = scipy.sparse.csr_matrix((cot.reshape(-1), (ii, jj)), shape=(V, V))
+    W = (W + W.T).tocsr()
+    
+    deg = np.array(W.sum(axis=1)).flatten()  # (V,)
+    
+    if use_normed:
+        d_inv_sqrt = np.zeros_like(deg)
+        nz = deg > 0
+        d_inv_sqrt[nz] = 1.0 / np.sqrt(deg[nz])
+        D_inv_sqrt = scipy.sparse.diags(d_inv_sqrt)
+        L = scipy.sparse.eye(V, format='csr') - (D_inv_sqrt @ W @ D_inv_sqrt)
+    else:
+        L = scipy.sparse.diags(deg) - W
+        
+    # inv_areas = np.zeros(V, dtype=np.float64)
     # idx = faces.ravel()
-    # np.add.at(inv_areas, idx, val)
+    # np.add.at(inv_areas, idx, np.repeat(area, 3))
     # mask = inv_areas > 0
     # inv_areas[mask] = 1.0 / inv_areas[mask]
-    # inv_areas = inv_areas[:, None]
 
-    # M_inv = scipy.sparse.diags(inv_areas.ravel())  # (V, V)
-    # L = M_inv @ L
-
-    if use_normed:
-        # # Make symmetric (normalized)
-        
-        # D^{-1/2}
-        deg_inv_sqrt = np.zeros_like(deg)
-        nonzero = deg > 0
-        deg_inv_sqrt[nonzero] = 1.0 / np.sqrt(deg[nonzero])
-        D_inv_sqrt = scipy.sparse.diags(deg_inv_sqrt)
-
-        L = scipy.sparse.identity(NV) - D_inv_sqrt @ W @ D_inv_sqrt
-
-        return L
-    else:
-        # # Make symmetric (unnormalized)
-        L = scipy.sparse.diags(deg) - L
-        return L
-    # return L
+    # return L.tocsr(), inv_areas
+    return L.tocsr()
