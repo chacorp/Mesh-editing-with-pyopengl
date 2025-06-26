@@ -61,7 +61,7 @@ class Mesh_container():
         
         self.orig_v = self.v.copy()
         
-        self.delta          = self.L @ self.v
+        self.delta = self.L @ self.v
         
         self.ring_indices   = [self.Adj[i].indices.tolist() for i in range(self.v.shape[0])]
         

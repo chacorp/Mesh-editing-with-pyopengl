@@ -178,8 +178,8 @@ def render(mesh,
     # handle_pos_new = new_v[handle_idx]
     handle_pos = mesh.v[handle_idx]
     handle_change = False
-    use_LSE = True
-    use_ARAP = False
+    use_LSE = False
+    use_ARAP = True
     normalize = False
     _ratio = 1.0
     
@@ -413,8 +413,8 @@ def render(mesh,
                 normalize   = False
                 Reset_button= False
                 handle_change = True
-                use_LSE = True
-                use_ARAP = False
+                use_LSE = False
+                use_ARAP = True
                 handle_pos_new = np.array([0.0, 0.0, 0.0])
                                 
             rotation_X = 180 if rotation_X <= -180 else rotation_X
@@ -492,11 +492,11 @@ if __name__ == '__main__':
         # boundary_idx=[26, 56, 61, 79, 82, 90, 104, 124, 130, 179, 181, 190, 197, 198, 209, 247, 277, 354, 390, 391, 407, 417, 473],
         # handle_idx=[144],
         
-        # mesh_path = "data/decimated_knight.obj",
-        # boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
-        # handle_idx=[324],
+        mesh_path = "data/decimated_knight.obj",
+        boundary_idx=[0, 43, 166, 194, 202, 256, 271, 301, 388, 404],
+        handle_idx=[324],
         
-        mesh_path = "data/square_21_spikes.obj",
-        boundary_idx=[399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440],
-        handle_idx=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41],
+        # mesh_path = "data/square_21_spikes.obj",
+        # boundary_idx=[399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440],
+        # handle_idx=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41],
     )

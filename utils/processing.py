@@ -15,13 +15,13 @@ def laplacian_matrix_ring_LSE(mesh):
         LS (np.array): Laplacian matrix with ring coordinates
     """
     V = mesh.v
-    N = mesh.v.shape[0]
+    N = V.shape[0]
     
     # laplacian matrix
     L = mesh.UL.todense()
     
     # laplacian coordinates :: Delta = L @ V
-    delta = mesh.UL @ mesh.v
+    delta = mesh.UL @ V
     # delta = np.concatenate([mesh.delta, np.ones([N, 1])], axis=-1)
     # delta = mesh.L @ np.concatenate([mesh.v, np.ones([N, 1])], axis=-1)
     
@@ -169,14 +169,14 @@ def laplacian_surface_editing(mesh, mask, boundary_idx, handle_idx, handle_pos, 
     Returns:
         new_verts (np.array):   new vertices after laplacian surface editing
     """
-    
-    N  = mesh.v.shape[0]
+    V = mesh.orig_v
+    N  = V.shape[0]
 
     # uniform laplacian
     LS = mesh.L_LSE
 
     # ------------------- Add Constraints to the Linear System ------------------- #
-    constraint_coef, constraint_b = get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb)
+    constraint_coef, constraint_b = get_constraints_3N(V, mask, handle_idx, handle_pos, Wb)
     # -------------------------- Solve the Linear System ------------------------- #
     A        = np.vstack([LS,         constraint_coef])
     b        = np.hstack([np.zeros(3*N), constraint_b])
@@ -201,12 +201,12 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
     Returns:
         new_verts (np.array):   new vertices after laplacian surface editing
     """
-    # mesh.v = mesh.orig_v
+    mesh.v = mesh.orig_v
     N  = mesh.v.shape[0]
     
     # ------------------- Add Constraints to the Linear System ------------------- #
-    constraint_coef, constraint_b = get_constraints(mesh, mask, handle_idx, handle_pos, Wb)
-    # constraint_coef_3N, constraint_b_3N = get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb)
+    constraint_coef, constraint_b = get_constraints(mesh.v, mask, handle_idx, handle_pos, Wb)
+    # constraint_coef_3N, constraint_b_3N = get_constraints_3N(mesh.v, mask, handle_idx, handle_pos, Wb)
     
     # -------------------------- Solve the Linear System ------------------------- #
     # A = np.vstack([mesh.L.todense()])
@@ -219,11 +219,12 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
     ATA = scipy.sparse.coo_matrix(A.T @ A)
     lu = scipy.sparse.linalg.splu(ATA.tocsc())
     
-    ATb = A.T @ b
-    v_prime = lu.solve(ATb)
-    v_prime = np.asarray(v_prime)
+    # ATb = A.T @ b
+    # v_prime = lu.solve(ATb)
+    # v_prime = np.asarray(v_prime)
     
-    mesh.v_prime = v_prime
+    # mesh.v_prime = v_prime
+    mesh.v_prime = mesh.v
     
     for it in range(iteration):
         # rhs = mesh.L @ mesh.v
@@ -239,14 +240,15 @@ def as_rigid_as_possible_surface_modeling(mesh, mask, boundary_idx, handle_idx, 
         v_prime = lu.solve(ATb)
                 
         v_prime = np.asarray(v_prime)
-        mesh.v_prime = v_prime.copy()
+        mesh.v_prime = v_prime
+        # mesh.v = mesh.v_prime
     
-    mesh.v = mesh.v_prime
     return mesh.v_prime
+    # return v_prime
 
-def get_constraints(mesh, mask, handle_idx, handle_pos, Wb=1.0):
+def get_constraints(vertices, mask, handle_idx, handle_pos, Wb=1.0):
     
-    N  = mesh.v.shape[0]
+    N  = vertices.shape[0]
     
     len_H = len(handle_idx)
     constraint_coef = np.zeros([N + len_H, N])
@@ -263,7 +265,7 @@ def get_constraints(mesh, mask, handle_idx, handle_pos, Wb=1.0):
                 
         if val == 0:
             constraint_coef[i, vidx] = 1.0 * Wb # one-hot
-            constraint_b[i]         = mesh.v[vidx] * Wb # fixed position
+            constraint_b[i]         = vertices[vidx] * Wb # fixed position
         i = i + 1
         
     # Handle constraints
@@ -279,8 +281,8 @@ def get_constraints(mesh, mask, handle_idx, handle_pos, Wb=1.0):
         
     return constraint_coef, constraint_b
 
-def get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb=1.0):
-    N  = mesh.v.shape[0]
+def get_constraints_3N(vertices, mask, handle_idx, handle_pos, Wb=1.0):
+    N  = vertices.shape[0]
     
     len_H = len(handle_idx)
     constraint_coef = np.zeros([3*N + 3*len_H, 3*N])
@@ -296,7 +298,7 @@ def get_constraints_3N(mesh, mask, handle_idx, handle_pos, Wb=1.0):
         
         if val == 0:
             constraint_coef[idx_c, idx_v] = 1.0 * Wb # one-hot
-            constraint_b[idx_c]           = mesh.v[vidx] * Wb # fixed position
+            constraint_b[idx_c]           = vertices[vidx] * Wb # fixed position
         i = i + 1
         
     # Handle constraints
