@@ -552,16 +552,16 @@ def find_closest_valid_points(V_src, F_src, V_tar, F_tar, normal_weight=0.5, k=1
     closest_points = np.zeros((N, 3))
     for i in range(N):
         best_score = np.inf
-        best_point = V_src[i]  # fallback
+        best_point = V_src[i] # self
         v = V_src[i]
         n = src_normals[i]
 
         for j in idxs[i]:
-            tri = V_tar[F_tar[j]]       # (3,3)
+            tri = V_tar[F_tar[j]] # (3,3)
             t_n = tri_normals[j]
             dot = np.dot(n, t_n)
 
-            if dot < 0:  # 90° 초과 → 무시
+            if dot < 0:
                 continue
 
             proj = project_point_to_triangle(v, tri)
@@ -646,7 +646,7 @@ def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_
     if val_tar is None:
         val_tar = V_src
         
-    N_src, N_src_fn = calc_norm_trimesh(V_src, F_src)
+    N_src = compute_vertex_normals(V_src, F_src)
     #print()
     N = V_src.shape[0]
     tri_centers = compute_triangle_centers(V_tar, F_tar)    # (T,3)
@@ -703,7 +703,6 @@ def find_closest_valid_feature_normal_first(V_src, F_src, V_tar, F_tar,
         val_tar = V_src.copy().astype(np.float64)
 
     src_normals = compute_vertex_normals(V_src, F_src)
-    # src_normals, _ = calc_norm_trimesh(V_src, F_src)
     tri_centers = compute_triangle_centers(V_tar, F_tar)
     tri_normals = compute_triangle_normals(V_tar, F_tar)
 
@@ -763,22 +762,25 @@ def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc
         V_S_INV = np.linalg.inv(V_S)
         ###########################################
         
-        # marker
+        ## Marker constraint ######################
         # A_m, RHS_m = creat_A_csr_matrix_34_marker(src_def_mesh.v, src_def_mesh.f, src_m, tgt_m, tgt_mesh.v, W=Wm, return_RHS=True)
-        # RHS_m = RHS_m.reshape(-1)
+        # little bit faster
         A_m, RHS_m = creat_A_csr_matrix_34_marker_small(src_def_mesh.v, src_def_mesh.f, src_m, tgt_m, tgt_mesh.v, W=Wm, return_RHS=True)
+        ###########################################
+        
         
         A_list = [A_m]
         RHS_list = [RHS_m]
         
-        # Deformation smoothness
+        ## Deformation smoothness #################
         if Ws > 0:
             #A_ds, RHS_ds = creat_A_csr_matrix_34_adj_triangle(src_def_mesh.v, src_def_mesh.f, V_S_INV, W=Ws, return_RHS=True)
             A_ds, RHS_ds = creat_A_csr_matrix_34_adj_triangle_small(src_def_mesh.v, src_def_mesh.f, V_S_INV, W=Ws, return_RHS=True)
             A_list.append(A_ds)
             RHS_list.append(RHS_ds)
+        ###########################################
         
-        # Deformation identity
+        ## Deformation identity ###################
         if Wi > 0:
             # A_i = creat_A_csr_matrix_34(src_def_mesh.v, src_def_mesh.f, V_S_INV, W=Wi)
             # RHS_i = np.eye(3)[None].repeat(src_def_mesh.f.shape[0], 0).reshape(-1) * Wi
@@ -786,8 +788,9 @@ def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc
             RHS_i = np.eye(3)[None].repeat(src_def_mesh.f.shape[0], 0).reshape(-1, 3) * Wi
             A_list.append(A_i)
             RHS_list.append(RHS_i)
+        ###########################################
 
-        # cloest valid point
+        # cloest valid point ######################
         if Wc > 0:
             if mode==1:
                 closest_pts0 = find_closest_valid_points(V_src=src_def_mesh.v, F_src=src_def_mesh.f, V_tar=tgt_mesh.v, F_tar=tgt_mesh.f, normal_weight=0.1, k=5)
@@ -797,22 +800,29 @@ def corr_system(src_mesh, tgt_mesh, src_m, tgt_m, num_iter=1, Ws=1, Wi=0.001, Wc
             A_c, RHS_c = creat_A_csr_matrix_34_marker_small(src_def_mesh.v, src_def_mesh.f, torch.arange(N), torch.arange(N), closest_pts0, W=Wc, return_RHS=True)
             A_list.append(A_c)
             RHS_list.append(RHS_c)
+        ###########################################
         
-        ## stack A
+        ## stack A ################################
+        # building ATA and solver
         A_ = scipy.sparse.vstack(A_list, format='csr')
+        lu_ = lu_factor_ata(A_)
+        ###########################################
             
-        ## stack RHS
+        ## stack RHS ##############################
+        # building ATb
         # RHS = np.hstack(RHS_list)
         RHS_ = np.vstack(RHS_list)
-        
-        lu_ = lu_factor_ata(A_)
         Atb_ = A_.T @ RHS_
+        ###########################################
         
+        
+        # solve ###################################
         solved_v = lu_.solve(Atb_)
         # solved_v = solved_v.reshape(-1,3)[:N]
+        ###########################################
         
-        # recenter
         src_def_mesh.v = solved_v[:N].copy()
+        # recenter
         #src_def_mesh.v = (solved_v - solved_v.mean(0) + src_mesh.v.mean(0)).copy()
         
         if show:

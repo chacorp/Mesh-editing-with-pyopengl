@@ -5,7 +5,7 @@ PyOpenGL_accelerate
 glfw
 numpy
 # git+https://github.com/facebookresearch/pytorch3d.git@stable
-"git+https://github.com/facebookresearch/pytorch3d.git@v0.7.6"
+# "git+https://github.com/facebookresearch/pytorch3d.git@v0.7.6"
 easydict
 imgui[glfw]
 scikit-learn
@@ -13,5 +13,5 @@ PyGLM
 open3d
 libigl
 robust_laplacian
-chamferdist
+# chamferdist
 git+https://github.com/chacorp/matplotrender.git
