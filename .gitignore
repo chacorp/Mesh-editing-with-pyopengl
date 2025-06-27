@@ -169,3 +169,8 @@ pca_npy/
 testwindow.py
 experiment*/
 LSE/
+utils/ict
+wrap3d/
+exp_data/
+mask/
+*tmp*/
