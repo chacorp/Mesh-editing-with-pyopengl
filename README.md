@@ -1,5 +1,5 @@
-# Geometry editing with pyopengl
-some implementation and experiments for mesh surface editing using python + opengl
+# 3D Mesh editing with pyopengl
+some implementations and experiments for mesh surface editing using python + opengl
 
 ## Setup
 Experimented on Python 3.8.10
