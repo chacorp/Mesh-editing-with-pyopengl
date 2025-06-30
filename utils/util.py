@@ -90,6 +90,18 @@ def normalize_torch(V):
     V = (V-(V.max(0).values + V.min(0).values) * 0.5)/max(V.max(0).values - V.min(0).values)
     return V
 
+def mesh_area(V, F):
+    v0 = V[F[:, 0]]
+    v1 = V[F[:, 1]]
+    v2 = V[F[:, 2]]
+
+    AB = v1 - v0
+    AC = v2 - v0
+    area = 0.5 * np.linalg.norm(np.cross(AB, AC), axis=-1)
+    area_diag = np.repeat(area[:, np.newaxis], 3, axis=-1).reshape(-1)
+    area = scipy.sparse.diags(area_diag)
+    return area
+
 def calc_norm(mesh):
     """
         mesh(trimesh.Trimesh)
@@ -631,7 +643,7 @@ def find_closest_valid_points_normal_first(V_src, F_src, V_tar, F_tar, normal_we
     return closest_points
 
 
-def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_weight=0.5, k=5, is_mat=False):
+def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_weight=0.5, k=5, is_mat=False, use_pnt=False):
     """
     Return closest valid points on the target mesh for each source vertex.
     
@@ -693,6 +705,23 @@ def find_closest_valid_feature(V_src, F_src, V_tar, F_tar, val_tar=None, normal_
             closest_value = blend_rotation_quaternions_dq(val_tri, (u,v,w))
         else: # val_tar Mx3
             closest_value = u*val_tri[0] + v*val_tri[1] + w*val_tri[2]
+            
+        if use_pnt:
+            if u < v:
+                if v < w:
+                    # u,v,w = 0,0,1
+                    closest_value = val_tri[2]
+                else:
+                    # u,v,w = 0,1,0
+                    closest_value = val_tri[1]
+            else:
+                if w < u:
+                    # u,v,w = 1,0,0
+                    closest_value = val_tri[0]
+                else:
+                    # u,v,w = 0,0,1
+                    closest_value = val_tri[2]
+        
         closest_points[i] = closest_value
 
     return closest_points
