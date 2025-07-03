@@ -160,7 +160,7 @@ def get_vertex_normals_from_tri_normals(V, F, Fn, eps=1e-8):
     Vn = Vn / np.linalg.norm(Vn, axis=1, keepdims=True) + eps
     return Vn
 
-def get_triangle_basis(V,F):
+def get_triangle_basis(V, F):
     VF = V[F]
     E1 = VF[:,1] - VF[:,0]
     E2 = VF[:,2] - VF[:,0]
@@ -170,6 +170,60 @@ def get_triangle_basis(V,F):
     # V4 = Vn + VF[:,0]
     # returns [V2-V1, V3-V1, V4-V1]
     return np.stack([E1, E2, Vn], axis=1).transpose(0,2,1)
+
+def fit_local_basis(points):
+    """
+    Fit a local coordinate frame using PCA (best-fit plane normal = last principal axis)
+    Returns: (3,3) basis matrix [e1; e2; n]
+    """
+    center = np.mean(points, axis=0)
+    pts_centered = points - center
+    U, S, VT = np.linalg.svd(pts_centered, full_matrices=False)
+    basis = VT.T  # columns = principal axes
+    return basis  # (3,3)
+
+def get_cell_bbox_scales(V, F, eps=1e-8):
+    """
+    For each vertex, compute the bounding box scale (x,y,z) over its 1-disk region.
+    Ensures all scales are strictly positive.
+
+    Returns:
+        scales: (N, 3) array of bounding box scales in object space
+    """
+    N = V.shape[0]
+    scales = np.zeros((N, 3))
+    vert2tris = [[] for _ in range(N)]
+
+    for ti, tri in enumerate(F):
+        for v in tri:
+            vert2tris[v].append(ti)
+
+    for vi in range(N):
+        tris = vert2tris[vi]
+        if not tris:
+            continue
+
+        v_set = set()
+        for ti in tris:
+            v_set.update(F[ti])
+        v_set = list(v_set)
+        local_pts = V[v_set]
+
+        # fit local coordinate frame
+        basis = fit_local_basis(local_pts)
+        centered = local_pts - np.mean(local_pts, axis=0)
+        obj_coords = centered @ basis  # project to local space
+
+        # bounding box in local space
+        bbox_min = np.min(obj_coords, axis=0)
+        bbox_max = np.max(obj_coords, axis=0)
+        scale = bbox_max - bbox_min
+
+        # enforce positivity and stability
+        scale = np.maximum(scale, eps)
+        scales[vi] = scale
+
+    return scales
 
 # def build_vertex_adjacency(F):
 #     adj = defaultdict(set)
@@ -1023,7 +1077,7 @@ def get_scale_foreach_triangle(Vsrc, Fsrc):
     for v_idx, nbh in enumerate(all_nbh):
 
         # get positions in both source and deformed meshes
-        local_src = Vsrc[nbh]
+        local_src = np.r_[Vsrc[nbh], Vsrc[v_idx]]
 
         # bounding box: max - min
         bbox_src = np.max(local_src, axis=0) - np.min(local_src, axis=0)
