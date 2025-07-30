@@ -23,6 +23,8 @@ pip install -r requirements.txt
     - `laplacian_coating_transfer.py` `[WIP]`
 7. As-Rigid-As-Possible Surface Modeling [Sorkine and Alexa 2007]
     - `ARAP.py`
+8. Mean Value Coordinates for Closed Triangular Meshes [Ju et al. 2005]
+    - `mean_value_coordinate.ipynb`
 
 ## TODO:
     - [ ] clean up code
