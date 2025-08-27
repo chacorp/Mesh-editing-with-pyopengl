@@ -25,6 +25,8 @@ pip install -r requirements.txt
     - `ARAP.py`
 8. Mean Value Coordinates for Closed Triangular Meshes [Ju et al. 2005]
     - `mean_value_coordinate.ipynb`
+9. Harmonic Coordinates for Character Articulation [Joshi et al. 2007]
+    - `harmonic_coordinates.ipynb` `[WIP]`
 
 ## TODO:
     - [ ] clean up code
