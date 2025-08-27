@@ -1,3 +1,4 @@
+# import torch
 import numpy as np
 import scipy
 
@@ -312,3 +313,223 @@ def get_constraints_3N(vertices, mask, handle_idx, handle_pos, Wb=1.0):
         i = i + 1
         h = h + 1
     return constraint_coef, constraint_b
+
+def compute_MVC(src_v, cage_v, cage_f, eps=1e-8):
+    """
+    MVC computation
+    Reference from original paper
+
+    Args:
+        src_v (np.ndarray): (V, 3) numpy array of mesh vertices
+        cage_v (np.ndarray): (Nc, 3) numpy array of cage vertices
+        cage_f (np.ndarray): (F, 3) numpy array of triangle indices into cage_v
+
+    Returns:
+        W_vert (np.ndarray): (V, F, 3) numpy array of per triangle cage weights for each vertex
+    """
+    V = src_v.shape[0]
+    F = cage_f.shape[0]
+    
+    # cage vertices per face
+    i0 = cage_f[:, 0]
+    i1 = cage_f[:, 1]
+    i2 = cage_f[:, 2]
+
+    P0 = cage_v[i0]  # (F, 3)
+    P1 = cage_v[i1]
+    P2 = cage_v[i2]
+
+    # Expand to (V, F, 3)
+    X = src_v[:, None, :]  # (V, 1, 3)
+    D0 = P0[None, :, :] - X  # (V, F, 3)
+    D1 = P1[None, :, :] - X
+    D2 = P2[None, :, :] - X
+
+    d0 = np.linalg.norm(D0, axis=-1) + eps
+    d1 = np.linalg.norm(D1, axis=-1) + eps
+    d2 = np.linalg.norm(D2, axis=-1) + eps
+
+    U0 = D0 / d0[..., None]
+    U1 = D1 / d1[..., None]
+    U2 = D2 / d2[..., None]
+
+    # angles
+    L0 = np.linalg.norm(U1 - U2, axis=-1)
+    L1 = np.linalg.norm(U2 - U0, axis=-1)
+    L2 = np.linalg.norm(U0 - U1, axis=-1)
+
+    theta0 = 2 * np.arcsin(np.clip(L0 * 0.5, -0.999999, 0.999999))
+    theta1 = 2 * np.arcsin(np.clip(L1 * 0.5, -0.999999, 0.999999))
+    theta2 = 2 * np.arcsin(np.clip(L2 * 0.5, -0.999999, 0.999999))
+
+    h = 0.5 * (theta0 + theta1 + theta2)
+
+    near_pi = np.abs(np.pi - h) < eps
+    not_near_pi = ~near_pi
+
+    s_theta0 = np.sin(theta0)
+    s_theta1 = np.sin(theta1)
+    s_theta2 = np.sin(theta2)
+
+    c0 = (2 * np.sin(h) * np.sin(h - theta0)) / (s_theta1 * s_theta2 + eps) - 1
+    c1 = (2 * np.sin(h) * np.sin(h - theta1)) / (s_theta2 * s_theta0 + eps) - 1
+    c2 = (2 * np.sin(h) * np.sin(h - theta2)) / (s_theta0 * s_theta1 + eps) - 1
+
+    s0 = np.abs(np.sqrt(np.clip(1 - c0**2, 0, 1)+ eps))
+    s1 = np.abs(np.sqrt(np.clip(1 - c1**2, 0, 1)+ eps))
+    s2 = np.abs(np.sqrt(np.clip(1 - c2**2, 0, 1)+ eps))
+
+    W0 = np.zeros((V, F))
+    W1 = np.zeros((V, F))
+    W2 = np.zeros((V, F))
+
+    # near-pi: degenerate case
+    sin_theta0 = np.sin(theta0)
+    deg_weight = sin_theta0 * d1 * d2
+
+    W0[near_pi] = deg_weight[near_pi]
+    W1[near_pi] = deg_weight[near_pi]
+    W2[near_pi] = deg_weight[near_pi]
+
+    # general case
+    num0 = (theta0 - c1 * theta2 - c2 * theta1)
+    num1 = (theta1 - c2 * theta0 - c0 * theta2)
+    num2 = (theta2 - c0 * theta1 - c1 * theta0)
+
+    denom0 = 2 * s1 * s_theta2 * d0
+    denom1 = 2 * s2 * s_theta0 * d1
+    denom2 = 2 * s0 * s_theta1 * d2
+
+    W0[not_near_pi] = num0[not_near_pi] / (denom0[not_near_pi] + eps)
+    W1[not_near_pi] = num1[not_near_pi] / (denom1[not_near_pi] + eps)
+    W2[not_near_pi] = num2[not_near_pi] / (denom2[not_near_pi] + eps)
+
+    # stack to (V, F, 3)
+    W_vert = np.stack([W0, W1, W2], axis=-1)
+    W_vert = W_vert / (W_vert.sum(dim=1, keepdim=True) + eps)
+    return W_vert
+
+def apply_MVC_weight(W, cage_f, cage_function, eps=1e-8):
+    """
+    Args:
+        W (np.ndarray): (V, F, 3) array of MVC weights
+        cage_f (np.ndarray): (F, 3) array of face indices
+        cage_function (np.ndarray): (Nc, 3) array of cage vertex attributes (e.g., position, displacement)
+    
+    Returns:
+        new_V: (V, 3) array of interpolated vertex values
+    """
+    V, F, _ = W.shape
+
+    # Get cage function values per face vertex (F, 3, 3)
+    tri_values = cage_function[cage_f]  # (F, 3, 3)
+
+    # Broadcast to (V, F, 3, 3)
+    tri_values = np.broadcast_to(tri_values[None, :, :, :], (V, F, 3, 3))  # (V, F, 3, 3)
+    W_exp = W[..., None]  # (V, F, 3, 1)
+
+    weighted_sum = (W_exp * tri_values).sum(axis=2)  # (V, F, 3)
+    total = weighted_sum.sum(axis=1)  # (V, 3)
+
+    weight_sum = W.sum(axis=(1, 2), keepdims=True)  # (V, 1, 1)
+    weight_sum = np.clip(weight_sum, eps, np.inf)
+
+    result = total / weight_sum.squeeze(-1)  # (V, 3)
+    return result
+
+def compute_MVC_vertexwise(src_v, cage_v, cage_f, eps=1e-8):
+    """
+    MVC computation vertex-wise for simple linear reproduction
+    
+    new_vertex_function = MVC @ cage_function
+
+    Args:
+        src_v (np.ndarray): (V, 3) numpy array of mesh vertices
+        cage_v (np.ndarray): (Nc, 3) numpy array of cage vertices
+        cage_f (np.ndarray): (F, 3) numpy array of triangle indices into cage_v
+
+    Returns:
+        W_vert (np.ndarray): (V, Nc) numpy array of cage weights per vertex
+    """
+    V = src_v.shape[0]
+    Nc = cage_v.shape[0]
+    F = cage_f.shape[0]
+
+    i0, i1, i2 = cage_f[:, 0], cage_f[:, 1], cage_f[:, 2]
+    P0 = cage_v[i0]  # (F, 3)
+    P1 = cage_v[i1]
+    P2 = cage_v[i2]
+
+    X = src_v[:, None, :]  # (V, 1, 3)
+
+    D0 = P0[None, :, :] - X  # (V, F, 3)
+    D1 = P1[None, :, :] - X
+    D2 = P2[None, :, :] - X
+
+    d0 = np.linalg.norm(D0, axis=-1).clip(min=eps)
+    d1 = np.linalg.norm(D1, axis=-1).clip(min=eps)
+    d2 = np.linalg.norm(D2, axis=-1).clip(min=eps)
+
+    U0 = D0 / d0[..., None]
+    U1 = D1 / d1[..., None]
+    U2 = D2 / d2[..., None]
+
+    L0 = np.linalg.norm((U1 - U2), axis=-1)
+    L1 = np.linalg.norm((U2 - U0), axis=-1)
+    L2 = np.linalg.norm((U0 - U1), axis=-1)
+
+    clamp_arcsin = lambda x: np.clip(x, -0.999999, 0.999999)
+    
+    theta0 = 2 * np.arcsin(clamp_arcsin(L0 * 0.5))
+    theta1 = 2 * np.arcsin(clamp_arcsin(L1 * 0.5))
+    theta2 = 2 * np.arcsin(clamp_arcsin(L2 * 0.5))
+    h = 0.5 * (theta0 + theta1 + theta2)
+
+    near_pi = np.abs(np.pi - h) < eps
+    not_near_pi = ~near_pi
+
+    s_theta0 = np.sin(theta0)
+    s_theta1 = np.sin(theta1)
+    s_theta2 = np.sin(theta2)
+
+    c0 = (2 * np.sin(h) * np.sin(h - theta0)) / (s_theta1 * s_theta2 + eps) - 1
+    c1 = (2 * np.sin(h) * np.sin(h - theta1)) / (s_theta2 * s_theta0 + eps) - 1
+    c2 = (2 * np.sin(h) * np.sin(h - theta2)) / (s_theta0 * s_theta1 + eps) - 1
+
+    def safe_sqrt(x):
+        return np.sqrt(np.clip(1 - x**2, 0, 1.0)+eps)
+    
+    s0 = safe_sqrt(c0)
+    s1 = safe_sqrt(c1)
+    s2 = safe_sqrt(c2)
+
+    W0 = np.zeros((V, F), dtype=np.float64)
+    W1 = np.zeros_like(W0)
+    W2 = np.zeros_like(W0)
+
+    deg_weight = s_theta0 * d1 * d2
+    W0[near_pi] = deg_weight[near_pi]
+    W1[near_pi] = deg_weight[near_pi]
+    W2[near_pi] = deg_weight[near_pi]
+
+    num0 = (theta0 - c1 * theta2 - c2 * theta1)
+    num1 = (theta1 - c2 * theta0 - c0 * theta2)
+    num2 = (theta2 - c0 * theta1 - c1 * theta0)
+
+    denom0 = 2 * s1 * s_theta2 * d0 + eps
+    denom1 = 2 * s2 * s_theta0 * d1 + eps
+    denom2 = 2 * s0 * s_theta1 * d2 + eps
+
+    W0[not_near_pi] = num0[not_near_pi] / denom0[not_near_pi]
+    W1[not_near_pi] = num1[not_near_pi] / denom1[not_near_pi]
+    W2[not_near_pi] = num2[not_near_pi] / denom2[not_near_pi]
+
+    # Convert to (V, Nc)
+    W_vert = np.zeros((V, Nc), dtype=np.float64)
+    for j, W in zip([i0, i1, i2], [W0, W1, W2]):
+        np.add.at(W_vert, (slice(None), j), W)
+
+    # Normalize to ensure partition of unity
+    W_vert = W_vert / (np.sum(W_vert, axis=1, keepdims=True) + eps)
+
+    return W_vert  # (V, Nc)
