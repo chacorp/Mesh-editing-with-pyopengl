@@ -28,6 +28,11 @@ pip install -r requirements.txt
 9. Harmonic Coordinates for Character Articulation [Joshi et al. 2007]
     - `harmonic_coordinates.ipynb` `[WIP]`
 
+## Toy notebooks
+- `bbox.ipynb` toy notebook for bounding box
+- `filter_test.ipynb` toy notebook for 1D filter
+
+
 ## TODO:
     - [ ] clean up code
     - [ ] must clean up code ...!
