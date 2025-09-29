@@ -22,6 +22,11 @@ Stacked all functions in one file...
 NOTE! these are unsorted!!
 """
 
+def apply_transform(V, MAT):
+    V = np.c_[V, np.ones(len(V))]
+    V = V @ MAT.T
+    return V[:,:3]
+
 # rotations
 def rotation(M, angle, x, y, z):
     angle = np.pi * angle / 180.0
@@ -1670,6 +1675,25 @@ def compute_face_gradient(V, F, f):
 
     return grads
 
+def find_knn_edges(V, k=4):
+    """
+    V: (n, 2) array of 2D points
+    k: number of neighbors (excluding self)
+
+    returns:
+        E: (m, 2) array of undirected edge indices
+    """
+    nbrs = NearestNeighbors(n_neighbors=k+1, algorithm='auto').fit(V)
+    d, indices = nbrs.kneighbors(V)
+
+    # exclude self (index 0), and build undirected edge set
+    E = set()
+    for i, neighbors in enumerate(indices):
+        for j in neighbors[1:]:
+            edge = tuple(sorted((i, j)))
+            E.add(edge)
+
+    return np.array(list(E))
 
 def compute_MVC_vertexwise_torch(src_v, cage_v, cage_f, eps=1e-8):
     """
